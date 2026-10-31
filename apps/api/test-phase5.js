@@ -215,6 +215,19 @@ async function runPhase5Tests() {
     // Worker polls task -> transitions to 'building'
     await fetch(`${base}/api/v1/workers/${workerWithTask}/tasks`, { headers: workerHeaders });
 
+    // The deployment may also be in the image-to-container transition; that
+    // state must be protected by the same delete guard.
+    await pool.query("UPDATE deployments SET state = 'deploying' WHERE id = $1", [depId]);
+    const deployingDeleteRes = await fetch(`${base}/api/v1/deployments/${depId}`, {
+      method: 'DELETE',
+      headers: adminHeaders,
+    });
+    const deployingDeleteJson = await deployingDeleteRes.json();
+    assert(
+      deployingDeleteRes.status === 400 && deployingDeleteJson.error?.code === 'ACTIVE_DEPLOYMENT',
+      'deploying deployment delete is rejected before gateway cleanup'
+    );
+
     // Worker reports running result
     await fetch(`${base}/api/v1/internal/deployments/${depId}/result`, {
       method: 'POST',

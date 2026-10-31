@@ -474,7 +474,12 @@ deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Respons
     // Reject active workloads before touching the gateway. Operators must
     // cancel/stop the workload explicitly; a rejected delete must not cause
     // an otherwise healthy public route to disappear.
-    if (current.state === 'running' || current.state === 'building' || current.state === 'queued') {
+    if (
+      current.state === 'running' ||
+      current.state === 'building' ||
+      current.state === 'deploying' ||
+      current.state === 'queued'
+    ) {
       res.status(400).json({
         success: false,
         error: {
