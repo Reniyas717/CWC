@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
-import { createGatewayServer, RouteManager, validateRouteInput } from './gateway.mjs';
+import { PassThrough } from 'node:stream';
+import { createGatewayServer, CaddyAdminClient, QuickTunnel, RouteManager, validateRouteInput } from './gateway.mjs';
 
 const healthServer = createServer((_request, response) => {
   response.writeHead(200).end('ok');
@@ -115,6 +116,32 @@ assert.throws(() => manager.get('restored'), /route was not found/);
 
 assert.throws(() => validateRouteInput({ deploymentId: 'bad/id', upstreamIp: '100.70.86.53', upstreamPort: 80 }), /safe route identifier/);
 assert.throws(() => validateRouteInput({ deploymentId: 'demo', upstreamIp: '127.0.0.1', upstreamPort: 80 }), /Tailscale IPv4/);
+assert.throws(() => validateRouteInput(null), /route input must be an object/);
+assert.throws(() => validateRouteInput({ deploymentId: 'demo', upstreamIp: '100.256.1.1', upstreamPort: 80 }), /Tailscale IPv4/);
+
+let caddyConfig;
+const caddyClient = new CaddyAdminClient('http://127.0.0.1:2019', async (_url, options) => {
+  caddyConfig = JSON.parse(options.body);
+  return new Response('', { status: 200 });
+});
+await caddyClient.apply({ deploymentId: 'config-check', listenerPort: 19001, upstreamIp: '100.70.86.53', upstreamPort: 8080, healthPath: '/health' });
+const caddyRoute = caddyConfig.apps.http.servers['cwc-config-check'].routes[0].handle[0];
+assert.deepEqual(caddyRoute.health_checks.active, { uri: '/health', interval: '5s', timeout: '2s' });
+
+const tunnelOutput = new PassThrough();
+const tunnelErrors = new PassThrough();
+const tunnelChild = new (class extends EventTarget {
+  constructor() { super(); this.stdout = tunnelOutput; this.stderr = tunnelErrors; }
+  once(event, handler) { this.addEventListener(event, (value) => handler(value.detail)); }
+  kill() { this.dispatchEvent(new CustomEvent('exit', { detail: 0 })); }
+})();
+const quickTunnel = new QuickTunnel(() => tunnelChild);
+const tunnelPromise = quickTunnel.start(19002);
+tunnelErrors.write('diagnostic output\n');
+tunnelOutput.write('INF https://brisk-moon.trycloudflare.com\n');
+const quickTunnelResult = await tunnelPromise;
+assert.equal(quickTunnelResult.url, 'https://brisk-moon.trycloudflare.com');
+quickTunnelResult.stop();
 
 server.close();
 healthServer.close();
