@@ -59,7 +59,7 @@ export function DashboardPage() {
                 <Icon className={`h-4 w-4 ${stat.color}`} />
               </CardHeader>
               <CardContent>
-                <div className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">
+                <div className="font-heading text-lg font-semibold tracking-tight text-slate-900 dark:text-white">
                   {stat.value}
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">{stat.description}</p>
@@ -79,8 +79,7 @@ export function DashboardPage() {
             </span>
           </CardTitle>
           <CardDescription>
-            The foundational monorepo structure, shared schemas, control plane API, distributed
-            worker agent, and frontend shell have been verified.
+            The foundational monorepo structure, shared schemas, control plane API, distributed worker agent, and frontend shell have been verified.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-xs text-slate-600 dark:text-slate-300">
@@ -90,8 +89,7 @@ export function DashboardPage() {
                 1. Monorepo & Workspaces
               </span>
               <p className="text-slate-500">
-                pnpm + Turborepo managing <code>apps/web</code>, <code>apps/api</code>,{' '}
-                <code>apps/worker</code>, and <code>packages/shared</code>.
+                pnpm + Turborepo managing <code>apps/web</code>, <code>apps/api</code>, <code>apps/worker</code>, and <code>packages/shared</code>.
               </p>
             </div>
             <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
@@ -99,8 +97,7 @@ export function DashboardPage() {
                 2. Control Plane & Data Store
               </span>
               <p className="text-slate-500">
-                Express API with strict Zod validation, request logging, CORS, PostgreSQL, and Redis
-                infrastructure.
+                Express API with strict Zod validation, request logging, CORS, PostgreSQL, and Redis infrastructure.
               </p>
             </div>
             <div className="p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-800">
@@ -108,17 +105,13 @@ export function DashboardPage() {
                 3. Distributed Worker Agent
               </span>
               <p className="text-slate-500">
-                Worker node agent configured for host resource metrics, prepared for Docker
-                container isolation.
+                Worker node agent configured for host resource metrics, prepared for Docker container isolation.
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-1 text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
-            <span>
-              Next Phase: Worker registration handshakes, Git clone & build pipeline, and
-              intelligent scheduling.
-            </span>
+            <span>Next Phase: Worker registration handshakes, Git clone & build pipeline, and intelligent scheduling.</span>
             <ArrowUpRight className="h-3 w-3" />
           </div>
         </CardContent>
