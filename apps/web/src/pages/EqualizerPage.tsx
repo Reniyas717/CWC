@@ -436,9 +436,9 @@ export function EqualizerPage() {
               Device Capacity Allocation Visualizer
             </h2>
             <p className="text-xs text-muted-foreground">
-              Allocation is measured against each workstation's total physical capacity ($
-              \frac{\text{Allocated}}{\text{Total}}$). Devices with lower allocation ratios
-              receive higher scheduling priority.
+              Allocation is measured against each workstation's total physical capacity (
+              <span className="font-mono text-foreground font-semibold">Allocated RAM / Total RAM</span>
+              ). Devices with lower allocation ratios receive higher scheduling priority.
             </p>
           </div>
           <div className="hidden sm:flex items-center gap-3 text-[11px] text-muted-foreground font-mono">
