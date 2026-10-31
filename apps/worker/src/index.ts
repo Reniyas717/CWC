@@ -1,15 +1,24 @@
 import os from 'os';
-import { WorkerHeartbeat, WorkerRegistration } from '@cloud-without-clouds/shared';
+import {
+  WorkerHeartbeat,
+  WorkerRegistration,
+} from '@cloud-without-clouds/shared';
 import { workerConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { ControlPlaneClient } from './services/control-plane-client.js';
+import { DeploymentRunner } from './services/deployment-runner.js';
+import { DockerEngine } from './services/docker-engine.js';
+import { GitRunner } from './services/git-runner.js';
 import { MetricsService } from './services/metrics.js';
+import { TaskPoller } from './services/task-poller.js';
 
 const logger = createLogger('WorkerAgent');
 
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let isHeartbeatRunning = false;
 let isShuttingDown = false;
+let taskPoller: TaskPoller | null = null;
+let dockerEngine: DockerEngine | null = null;
 
 async function bootstrap() {
   logger.info('==================================================');
@@ -28,6 +37,17 @@ async function bootstrap() {
 
   const metricsService = new MetricsService();
   const controlPlaneClient = new ControlPlaneClient();
+  const gitRunner = new GitRunner();
+  dockerEngine = new DockerEngine();
+
+  const deploymentRunner = new DeploymentRunner(
+    gitRunner,
+    dockerEngine,
+    controlPlaneClient,
+    metricsService
+  );
+
+  taskPoller = new TaskPoller(controlPlaneClient, deploymentRunner);
 
   // 1. Initial health inspection of host resources
   const initialResources = metricsService.getResources();
@@ -77,7 +97,10 @@ async function bootstrap() {
     );
   }
 
-  // 4. Non-overlapping periodic heartbeat telemetry loop
+  // 4. Start task polling loop
+  taskPoller.start();
+
+  // 5. Non-overlapping periodic heartbeat telemetry loop
   const executeHeartbeat = async () => {
     if (isShuttingDown || isHeartbeatRunning) {
       return;
@@ -100,13 +123,16 @@ async function bootstrap() {
           state: heartbeatPayload.state,
           freeMemoryMb: resources.freeMemoryMb,
           cpuUsagePercent: resources.cpuUsagePercent,
+          activeContainers: resources.activeContainers,
         });
       } else if (res.isNotImplemented) {
         logger.debug(
           `Heartbeat endpoint returned HTTP ${res.statusCode} (endpoint pending on Control Plane)`
         );
       } else {
-        logger.warn(`Heartbeat report failed: ${res.error || `HTTP ${res.statusCode}`}`);
+        logger.warn(
+          `Heartbeat report failed: ${res.error || `HTTP ${res.statusCode}`}`
+        );
       }
     } catch (err: unknown) {
       logger.error('Unexpected error during heartbeat execution', err);
@@ -121,12 +147,16 @@ async function bootstrap() {
     `Heartbeat telemetry loop active (interval: ${workerConfig.HEARTBEAT_INTERVAL_MS}ms)`
   );
 
-  // 5. Graceful termination handler
+  // 6. Graceful termination handler
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
 
     logger.info(`Received ${signal}. Initiating graceful worker shutdown...`);
+
+    if (taskPoller) {
+      taskPoller.stop();
+    }
 
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
@@ -136,7 +166,7 @@ async function bootstrap() {
     metricsService.setState('draining');
 
     try {
-      // Notify Control Plane about draining/offline state with timeout
+      // Notify Control Plane about draining state with short timeout
       await controlPlaneClient.sendStatus(
         workerConfig.WORKER_ID,
         'draining',
@@ -144,6 +174,11 @@ async function bootstrap() {
       );
     } catch {
       // Ignore network errors on shutdown
+    }
+
+    // Stop and remove all active containers
+    if (dockerEngine) {
+      await dockerEngine.cleanupAllContainers();
     }
 
     metricsService.setState('offline');
