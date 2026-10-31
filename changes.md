@@ -182,3 +182,87 @@ Updated route handlers to apply auth guards:
     ```
   - `POST /api/v1/workers/register` with `Authorization: Bearer dev-worker-secret-token-change-in-production` passes auth check.
 - **Git Synchronization**: Merged remote worker and deploy updates and pushed to `main`.
+
+
+---
+
+# Changes & Implementation Log: Phase 3 — Worker Registration & Heartbeat API
+
+## 1. Overview & Objectives
+
+In **Phase 3**, we implemented the full worker lifecycle communication engine on the Control Plane API (`apps/api`):
+- Redis connection management for ephemeral worker heartbeat leases (35s TTL).
+- Worker node registration with hardware telemetry and capability quotas.
+- Periodic heartbeat telemetry receiver updating both PostgreSQL and Redis cache.
+- Worker status state transitions (e.g. graceful shutdown and draining).
+- Worker listing and detail endpoints conforming to shared contracts.
+
+---
+
+## 2. Dependencies & Tooling
+
+Installed in `apps/api`:
+- **`ioredis` (^5.4.2)**: High-performance Redis client for Node.js.
+- **`@types/ioredis`**: Type definitions for Redis operations.
+
+---
+
+## 3. Redis Heartbeat Leases (`apps/api/src/cache/redis.ts`)
+
+- Configured singleton Redis client connecting via `env.REDIS_HOST`, `env.REDIS_PORT`, and `env.REDIS_PASSWORD`.
+- Added helper functions:
+  - `checkRedisConnection()`: Ping verification measuring roundtrip latency in ms.
+  - `recordWorkerHeartbeatInCache(workerId, timestamp)`: Sets `worker:last_seen:<id>` with a 35-second TTL (`EX 35`).
+  - `getWorkerLastSeenFromCache(workerId)`: Fetches lease timestamp.
+  - `removeWorkerFromCache(workerId)`: Evicts lease on node drain/shutdown.
+  - `getActiveWorkerIdsFromCache()`: Lists all non-expired worker IDs.
+- Connected Redis health monitoring dynamically to `GET /health` (`apps/api/src/routes/health.ts`).
+
+---
+
+## 4. Worker Routes Implementation (`apps/api/src/routes/workers.ts`)
+
+Implemented and verified the following endpoints:
+
+1. **`POST /api/v1/workers/register`** (`requireWorker`):
+   - Validates payload against `WorkerRegistrationSchema`.
+   - Derives client IP address (from headers/socket).
+   - Upserts into PostgreSQL `worker_nodes` table with state `'idle'`.
+   - Records 35s active lease in Redis.
+   - Returns `WorkerStatusResponse` with `acknowledged: true` and the registered `WorkerNode`.
+2. **`POST /api/v1/workers/heartbeat`** (`requireWorker`):
+   - Validates payload against `WorkerHeartbeatSchema`.
+   - Verifies worker registration exists in PostgreSQL (returns 404 if unregistered).
+   - Updates `cpuUsagePercent`, `freeMemoryMb`, `usedMemoryMb`, `activeContainers`, `state`, and `lastHeartbeatAt`.
+   - Refreshes 35s lease in Redis (`worker:last_seen:<workerId>`).
+   - Returns `200 OK` acknowledgment.
+3. **`POST /api/v1/workers/status`** (`requireWorker`):
+   - Accepts explicit state transitions (`idle`, `busy`, `draining`, `offline`, `error`).
+   - Updates PostgreSQL `worker_nodes.state`.
+   - Automatically purges the Redis heartbeat lease if state transitions to `draining` or `offline`.
+4. **`GET /api/v1/workers`** (`optionalAdmin`):
+   - Queries all workers from PostgreSQL `worker_nodes`.
+   - Maps database rows to canonical `WorkerNode` interface.
+   - Returns `{ success: true, count, data: WorkerNode[] }`.
+5. **`GET /api/v1/workers/:id`** (`optionalAdmin`):
+   - Fetches individual worker details by ID.
+6. **`GET /api/v1/workers/:id/tasks`** (`requireWorker`):
+   - Poll endpoint for deployment task dispatch (returns `hasTask: false` awaiting Phase 4 scheduler).
+
+---
+
+## 5. Verification & Test Suite
+
+- **Unit/Integration Test Suite (`apps/api/test-auth.js`)**:
+  - Expanded test suite to cover all auth scenarios, payload validation, and responses.
+  - All 25 test cases passing (`25 passed, 0 failed`).
+- **Live End-to-End Verification**:
+  - Registered worker node `worker-node-redis-check`.
+  - Verified persistence in PostgreSQL `worker_nodes` via `psql`.
+  - Verified 35s TTL key `worker:last_seen:worker-node-redis-check` in Redis container (`cwc-redis`).
+  - Tested heartbeat telemetry updates and verified state reflection.
+  - Tested explicit drain status and confirmed Redis key removal.
+- **Type Checking & Linting**:
+  - `pnpm check-types` passed with 0 errors.
+  - `pnpm lint` passed with 0 errors.
+  - `pnpm --filter @cloud-without-clouds/api build` compiled successfully.

@@ -1,5 +1,5 @@
 /**
- * Automated Verification Suite for Phase 2: Auth Middleware
+ * Automated Verification Suite for Auth & Worker Endpoints
  * Tests all authorization permutations across public, admin, and worker endpoints.
  */
 
@@ -7,6 +7,49 @@ const base = process.env.API_BASE_URL || 'http://localhost:4000';
 const adminToken = process.env.ADMIN_TOKEN || 'dev-admin-token-change-in-production';
 const workerToken = process.env.WORKER_SECRET_TOKEN || 'dev-worker-secret-token-change-in-production';
 const wrongToken = 'completely-wrong-token-12345';
+
+const sampleWorkerRegistration = {
+  id: 'worker-auth-test-01',
+  name: 'Auth Test Worker',
+  hostname: 'auth-host',
+  port: 5001,
+  authToken: workerToken,
+  resources: {
+    cpuCount: 8,
+    cpuUsagePercent: 15,
+    totalMemoryMb: 8192,
+    freeMemoryMb: 6144,
+    usedMemoryMb: 2048,
+    activeContainers: 0,
+  },
+  limits: {
+    maxConcurrentWorkloads: 4,
+    maxMemoryMb: 4096,
+    maxCpuCores: 2,
+  },
+  version: '0.1.0',
+};
+
+const sampleHeartbeat = {
+  workerId: 'worker-auth-test-01',
+  state: 'idle',
+  resources: {
+    cpuCount: 8,
+    cpuUsagePercent: 15,
+    totalMemoryMb: 8192,
+    freeMemoryMb: 6144,
+    usedMemoryMb: 2048,
+    activeContainers: 0,
+  },
+  activeWorkloadIds: [],
+  timestamp: new Date().toISOString(),
+};
+
+const sampleStatus = {
+  workerId: 'worker-auth-test-01',
+  state: 'idle',
+  timestamp: new Date().toISOString(),
+};
 
 const tests = [
   { name: '1. Health endpoint (Public)', url: '/health', method: 'GET', headers: {}, expectedStatus: 200 },
@@ -25,13 +68,13 @@ const tests = [
   { name: '4a. Workers REGISTER without token', url: '/api/v1/workers/register', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '4b. Workers REGISTER with wrong token', url: '/api/v1/workers/register', method: 'POST', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '4c. Workers REGISTER with admin token instead of worker', url: '/api/v1/workers/register', method: 'POST', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '4d. Workers REGISTER with valid worker token', url: '/api/v1/workers/register', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 501 },
+  { name: '4d. Workers REGISTER with valid worker token and payload', url: '/api/v1/workers/register', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken, 'Content-Type': 'application/json' }, body: JSON.stringify(sampleWorkerRegistration), expectedStatus: 200 },
 
   { name: '5a. Workers HEARTBEAT without token', url: '/api/v1/workers/heartbeat', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '5b. Workers HEARTBEAT with valid worker token', url: '/api/v1/workers/heartbeat', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 501 },
+  { name: '5b. Workers HEARTBEAT with valid worker token and payload', url: '/api/v1/workers/heartbeat', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken, 'Content-Type': 'application/json' }, body: JSON.stringify(sampleHeartbeat), expectedStatus: 200 },
 
   { name: '6a. Workers STATUS without token', url: '/api/v1/workers/status', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '6b. Workers STATUS with valid worker token', url: '/api/v1/workers/status', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 501 },
+  { name: '6b. Workers STATUS with valid worker token and payload', url: '/api/v1/workers/status', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken, 'Content-Type': 'application/json' }, body: JSON.stringify(sampleStatus), expectedStatus: 200 },
 
   { name: '7a. Workers TASKS poll without token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '7b. Workers TASKS poll with wrong token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
@@ -48,13 +91,13 @@ const tests = [
 ];
 
 async function main() {
-  console.log('🚀 Running Phase 2 Full Auth Verification Suite against', base);
+  console.log('🚀 Running Full Auth & Worker Endpoint Verification Suite against', base);
   let passed = 0;
   let failed = 0;
 
   for (const t of tests) {
     try {
-      const res = await fetch(base + t.url, { method: t.method, headers: t.headers });
+      const res = await fetch(base + t.url, { method: t.method, headers: t.headers, body: t.body });
       const json = await res.json().catch(() => ({}));
       const statusOk = res.status === t.expectedStatus;
       const codeOk = t.checkCode ? json.error?.code === t.checkCode : true;
