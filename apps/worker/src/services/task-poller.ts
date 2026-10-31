@@ -54,15 +54,23 @@ export class TaskPoller {
     try {
       const response = await this.controlPlaneClient.pollTasks(workerConfig.WORKER_ID);
 
-      if (response.ok && response.data?.hasTask && response.data.task) {
-        const task = response.data.task;
-        logger.info(`Received deployment task ${task.deploymentId} from Control Plane`, {
-          deploymentId: task.deploymentId,
-          repo: task.git.repositoryUrl,
-        });
+      if (response.ok && response.data) {
+        const rawData = response.data as { action?: string; deploymentId?: string };
+        if (rawData.action === 'cancel' || rawData.action === 'stop') {
+          if (rawData.deploymentId) {
+            logger.info(`Received stop/cancel directive for deployment ${rawData.deploymentId}`);
+            void this.deploymentRunner.stopDeployment(rawData.deploymentId);
+          }
+        } else if (response.data.hasTask && response.data.task) {
+          const task = response.data.task;
+          logger.info(`Received deployment task ${task.deploymentId} from Control Plane`, {
+            deploymentId: task.deploymentId,
+            repo: task.git.repositoryUrl,
+          });
 
-        // Run task asynchronously so it does not block the polling loop
-        void this.deploymentRunner.executeTask(task);
+          // Run task asynchronously so it does not block the polling loop
+          void this.deploymentRunner.executeTask(task);
+        }
       } else if (response.isNotImplemented) {
         logger.debug(
           `Task polling endpoint returned HTTP ${response.statusCode} (endpoint not yet implemented on Control Plane)`

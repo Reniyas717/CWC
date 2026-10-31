@@ -8,6 +8,8 @@ import { createLogger } from '../logger.js';
 const execFileAsync = promisify(execFile);
 const logger = createLogger('DockerEngine');
 
+const MAX_LOG_ENTRIES = 500;
+
 export interface DockerBuildOptions {
   deploymentId: string;
   workingDir: string;
@@ -30,10 +32,17 @@ export interface DockerRunOptions {
   healthCheckPath?: string;
 }
 
+export interface DockerResourceCaps {
+  memoryBytes: number;
+  nanoCpus: number;
+  pidsLimit: number;
+}
+
 export interface DockerRunResult {
   containerId: string;
   assignedPort: number;
   publicUrl: string;
+  resourceCaps: DockerResourceCaps;
   logs: DeploymentLogEntry[];
 }
 
@@ -44,22 +53,44 @@ export class DockerEngine {
   > = new Map();
 
   /**
-   * Builds a Docker image from the checked out source code.
+   * Builds a Docker image from the checked out source code with path traversal protection.
    */
   public async buildImage(options: DockerBuildOptions): Promise<DockerBuildResult> {
     const { deploymentId, workingDir, dockerfilePath = 'Dockerfile', buildContext } = options;
 
-    const imageTag = `cwc-${deploymentId.toLowerCase()}:latest`;
-    const resolvedContext = buildContext ? path.resolve(workingDir, buildContext) : workingDir;
-    let resolvedDockerfilePath: string;
+    const normalizedWorkingDir = path.resolve(workingDir);
+    const resolvedContext = buildContext
+      ? path.resolve(normalizedWorkingDir, buildContext)
+      : normalizedWorkingDir;
 
+    // Path traversal check for build context
+    if (!resolvedContext.startsWith(normalizedWorkingDir)) {
+      throw new Error(
+        `Security Error: Build context "${buildContext}" escapes repository directory.`
+      );
+    }
+
+    let resolvedDockerfilePath: string;
     if (path.isAbsolute(dockerfilePath)) {
       resolvedDockerfilePath = dockerfilePath;
-    } else if (fsSync.existsSync(path.resolve(workingDir, dockerfilePath))) {
-      resolvedDockerfilePath = path.resolve(workingDir, dockerfilePath);
+    } else if (fsSync.existsSync(path.resolve(normalizedWorkingDir, dockerfilePath))) {
+      resolvedDockerfilePath = path.resolve(normalizedWorkingDir, dockerfilePath);
     } else {
       resolvedDockerfilePath = path.resolve(resolvedContext, dockerfilePath);
     }
+
+    // Path traversal check for Dockerfile
+    if (!resolvedDockerfilePath.startsWith(normalizedWorkingDir)) {
+      throw new Error(
+        `Security Error: Dockerfile path "${dockerfilePath}" escapes repository directory.`
+      );
+    }
+
+    if (!fsSync.existsSync(resolvedDockerfilePath)) {
+      throw new Error(`Dockerfile not found at resolved path: ${resolvedDockerfilePath}`);
+    }
+
+    const imageTag = `cwc-${deploymentId.toLowerCase()}:latest`;
 
     logger.info(`Building Docker image ${imageTag}...`, {
       deploymentId,
@@ -73,12 +104,21 @@ export class DockerEngine {
       stream: 'stdout' | 'stderr' | 'system' = 'stdout',
       level: 'info' | 'warn' | 'error' = 'info'
     ) => {
-      logs.push({
-        timestamp: new Date().toISOString(),
-        level,
-        message: message.trim(),
-        stream,
-      });
+      if (logs.length < MAX_LOG_ENTRIES) {
+        logs.push({
+          timestamp: new Date().toISOString(),
+          level,
+          message: message.trim(),
+          stream,
+        });
+      } else if (logs.length === MAX_LOG_ENTRIES) {
+        logs.push({
+          timestamp: new Date().toISOString(),
+          level: 'warn',
+          message: '[Logs truncated: maximum buffer limit of 500 entries reached]',
+          stream: 'system',
+        });
+      }
     };
 
     addLog(`Initiating Docker build for ${imageTag}`, 'system', 'info');
@@ -136,12 +176,14 @@ export class DockerEngine {
       stream: 'stdout' | 'stderr' | 'system' = 'stdout',
       level: 'info' | 'warn' | 'error' = 'info'
     ) => {
-      logs.push({
-        timestamp: new Date().toISOString(),
-        level,
-        message: message.trim(),
-        stream,
-      });
+      if (logs.length < MAX_LOG_ENTRIES) {
+        logs.push({
+          timestamp: new Date().toISOString(),
+          level,
+          message: message.trim(),
+          stream,
+        });
+      }
     };
 
     // Clean up any stale container with the same name first
@@ -201,6 +243,14 @@ export class DockerEngine {
       'info'
     );
 
+    // Verify enforced kernel resource caps via docker inspect
+    const resourceCaps = await this.inspectContainerResourceLimits(containerId);
+    logger.info(`Enforced resource caps verified for container ${containerId.substring(0, 12)}`, {
+      memoryBytes: resourceCaps.memoryBytes,
+      nanoCpus: resourceCaps.nanoCpus,
+      pidsLimit: resourceCaps.pidsLimit,
+    });
+
     // Register active container in memory
     this.activeContainers.set(deploymentId, {
       deploymentId,
@@ -215,6 +265,7 @@ export class DockerEngine {
       containerId,
       assignedPort,
       publicUrl,
+      resourceCaps,
       logs,
     };
   }
@@ -245,6 +296,32 @@ export class DockerEngine {
       throw new Error(`Could not determine assigned host port for container ${containerId}`, {
         cause: err,
       });
+    }
+  }
+
+  /**
+   * Queries Docker HostConfig to confirm CPU, memory, and PID limits are enforced.
+   */
+  public async inspectContainerResourceLimits(containerId: string): Promise<DockerResourceCaps> {
+    try {
+      const { stdout } = await execFileAsync('docker', [
+        'inspect',
+        '--format',
+        '{{.HostConfig.Memory}} {{.HostConfig.NanoCPUs}} {{.HostConfig.PidsLimit}}',
+        containerId,
+      ]);
+
+      const parts = stdout.trim().split(/\s+/);
+      return {
+        memoryBytes: parseInt(parts[0] || '0', 10),
+        nanoCpus: parseInt(parts[1] || '0', 10),
+        pidsLimit: parseInt(parts[2] || '0', 10),
+      };
+    } catch (err) {
+      logger.warn(`Could not inspect resource caps for container ${containerId}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { memoryBytes: 0, nanoCpus: 0, pidsLimit: 0 };
     }
   }
 

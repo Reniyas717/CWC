@@ -47,15 +47,51 @@ export class GitRunner {
   }
 
   /**
+   * Validates a Git branch or tag name to prevent flag injection or path traversal.
+   */
+  public validateRefName(ref: string): boolean {
+    if (!ref || ref.startsWith('-') || ref.includes('..') || ref.includes('//')) {
+      return false;
+    }
+    return /^[a-zA-Z0-9_./-]+$/.test(ref);
+  }
+
+  /**
+   * Validates a Git commit SHA (7 to 64 hexadecimal characters).
+   */
+  public validateCommitHash(sha: string): boolean {
+    return /^[a-fA-F0-9]{7,64}$/.test(sha);
+  }
+
+  /**
+   * Validates a deployment ID for safe filesystem path construction.
+   */
+  public validateDeploymentId(id: string): boolean {
+    return /^[a-zA-Z0-9_-]+$/.test(id);
+  }
+
+  /**
    * Clones a public repository into an isolated temporary workspace directory.
    */
   public async cloneRepository(options: GitCloneOptions): Promise<GitCloneResult> {
     const { deploymentId, repositoryUrl, branch = 'main', commitHash } = options;
 
+    if (!this.validateDeploymentId(deploymentId)) {
+      throw new Error(`Invalid deployment ID: "${deploymentId}". Must be alphanumeric with dashes/underscores.`);
+    }
+
     if (!this.validateRepositoryUrl(repositoryUrl)) {
       throw new Error(
-        `Invalid or insecure repository URL: ${repositoryUrl}. Only public https:// URLs are permitted.`
+        `Invalid or insecure repository URL: ${repositoryUrl}. Only public https:// URLs without credentials are permitted.`
       );
+    }
+
+    if (!this.validateRefName(branch)) {
+      throw new Error(`Invalid Git branch name: "${branch}".`);
+    }
+
+    if (commitHash && !this.validateCommitHash(commitHash)) {
+      throw new Error(`Invalid Git commit hash: "${commitHash}". Must be a 7-64 char hex string.`);
     }
 
     const workingDir = path.join(this.baseBuildsDir, deploymentId);

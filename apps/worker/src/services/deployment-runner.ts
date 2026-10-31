@@ -125,7 +125,11 @@ export class DeploymentRunner {
       });
 
       allLogs.push(...runResult.logs);
-      addLog(`Application successfully deployed on ${runResult.publicUrl}`, 'system', 'info');
+      addLog(
+        `Application successfully deployed on ${runResult.publicUrl} with verified limits (RAM: ${Math.round(runResult.resourceCaps.memoryBytes / (1024 * 1024))}MB, CPUs: ${runResult.resourceCaps.nanoCpus / 1e9}, PIDs: ${runResult.resourceCaps.pidsLimit})`,
+        'system',
+        'info'
+      );
 
       // Clean up temporary clone workspace
       await this.gitRunner.cleanup(workingDir);
@@ -196,5 +200,15 @@ export class DeploymentRunner {
     this.dockerEngine.unregisterActiveContainer(deploymentId);
     this.metricsService.unregisterWorkload(deploymentId);
     this.activeDeployments.delete(deploymentId);
+
+    try {
+      await this.controlPlaneClient.reportResult({
+        deploymentId,
+        workerId: workerConfig.WORKER_ID,
+        state: 'stopped',
+      });
+    } catch {
+      // Ignore API transmission errors during stop
+    }
   }
 }
