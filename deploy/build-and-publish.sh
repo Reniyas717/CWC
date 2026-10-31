@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+exec {RESULT_FD}>&1
+
 usage() {
   cat >&2 <<'USAGE'
 Usage: build-and-publish.sh <public-https-git-url> <branch> <dockerhub-repository>
 
 Builds the branch tip using ./Dockerfile at the repository root and pushes
 <dockerhub-repository>:<commit-sha>. Authenticate with `docker login` first.
+The image tag identifies the source commit; a returned digest identifies the
+specific image content published for that tag.
 USAGE
 }
 
@@ -55,6 +59,37 @@ cleanup() {
   fi
 }
 
+CHILD_PID=
+
+run_child() {
+  local status=0
+  "$@" &
+  CHILD_PID=$!
+  wait "$CHILD_PID" || status=$?
+  CHILD_PID=
+  return "$status"
+}
+
+handle_signal() {
+  local signal=$1 exit_status=130
+  [[ $signal == TERM ]] && exit_status=143
+
+  trap - EXIT INT TERM
+  log "received SIG${signal}; stopping active command and cleaning up"
+  if [[ -n ${CHILD_PID:-} ]] && kill -0 "$CHILD_PID" 2>/dev/null; then
+    kill -TERM "$CHILD_PID" 2>/dev/null || true
+    wait "$CHILD_PID" 2>/dev/null || true
+    CHILD_PID=
+  fi
+  cleanup
+  emit_result failure interrupted "pipeline interrupted by SIG${signal}" >&"$RESULT_FD"
+  exit "$exit_status"
+}
+
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
+trap cleanup EXIT
+
 if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
   usage
   exit 0
@@ -92,15 +127,13 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
+if ! run_child docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
   fail docker "Docker daemon is unavailable; start Docker and try again"
 fi
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cwc-build.XXXXXX")
-trap cleanup EXIT
-
 log "cloning ${REPOSITORY_URL} (branch ${BRANCH})"
-if ! git clone --depth 1 --single-branch --branch "$BRANCH" "$REPOSITORY_URL" "$WORK_DIR" >&2; then
+if ! run_child git clone --depth 1 --single-branch --branch "$BRANCH" "$REPOSITORY_URL" "$WORK_DIR" >&2; then
   fail clone "unable to clone the requested branch"
 fi
 
@@ -113,17 +146,23 @@ fi
 
 IMAGE_REF="${DOCKERHUB_REPOSITORY}:${COMMIT_SHA}"
 log "building ${IMAGE_REF}"
-if ! docker build --tag "$IMAGE_REF" "$WORK_DIR" >&2; then
+if ! run_child docker build --tag "$IMAGE_REF" "$WORK_DIR" >&2; then
   fail build "Docker image build failed"
 fi
 
 log "pushing ${IMAGE_REF}"
-if ! docker push "$IMAGE_REF" >&2; then
+if ! run_child docker push "$IMAGE_REF" >&2; then
   fail push "Docker Hub push failed"
 fi
 
-if DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_REF" 2> >(sed 's/^/[docker] /' >&2)); then
-  [[ $DIGEST == "<no value>" ]] && DIGEST=
+if DIGEST_REFERENCE=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_REF" 2> >(sed 's/^/[docker] /' >&2)); then
+  if [[ $DIGEST_REFERENCE == *@* ]]; then
+    DIGEST=${DIGEST_REFERENCE##*@}
+  elif [[ $DIGEST_REFERENCE =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    DIGEST=$DIGEST_REFERENCE
+  else
+    DIGEST=
+  fi
 else
   DIGEST=
 fi
