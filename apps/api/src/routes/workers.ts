@@ -493,6 +493,7 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
         .where(
           and(
             eq(deployments.state, 'queued'),
+            isNull(deployments.routingError),
             or(eq(deployments.workerId, id), isNull(deployments.workerId))
           )
         )

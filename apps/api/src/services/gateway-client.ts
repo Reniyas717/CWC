@@ -117,10 +117,29 @@ export class GatewayClient {
           signal: AbortSignal.timeout(10000),
         });
 
-        // A missing route is already in the desired state. The gateway also
-        // returns success when an attempt-guarded removal is superseded by a
-        // newer route, because the old route must not be touched.
-        if (response.ok || response.status === 404) {
+        // A missing route is already in the desired state. A superseded
+        // attempt is not successful cleanup: the newer route is still live,
+        // so recovery must remain blocked until an authoritative cleanup can
+        // complete without deleting that newer route.
+        if (response.status === 404) {
+          console.log(`[GatewayClient] Route removed for ${deploymentId}`);
+          return true;
+        }
+
+        if (response.ok) {
+          const body: unknown = await response.json().catch(() => null);
+          if (
+            typeof body === 'object' &&
+            body !== null &&
+            'data' in body &&
+            typeof body.data === 'object' &&
+            body.data !== null &&
+            'status' in body.data &&
+            body.data.status === 'superseded'
+          ) {
+            console.warn(`[GatewayClient] Route cleanup for ${deploymentId} was superseded`);
+            return false;
+          }
           console.log(`[GatewayClient] Route removed for ${deploymentId}`);
           return true;
         }

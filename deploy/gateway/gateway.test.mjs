@@ -259,6 +259,21 @@ await assert.rejects(
 );
 assert.equal(manager.get('api-restored').status, 'ready');
 
+// A failed replacement attempt must not preserve the previous attempt's
+// tunnel, even when it targets the same upstream IP and port.
+probeAvailable = false;
+const failedReplacement = await manager.reconcile(async () => [
+  {
+    deploymentId: 'api-restored',
+    attemptId: 'replacement-attempt',
+    upstreamIp: '100.70.86.53',
+    upstreamPort: healthPort,
+  },
+]);
+assert.equal(failedReplacement.length, 0);
+assert.throws(() => manager.get('api-restored'), /route was not found/);
+probeAvailable = true;
+
 assert.throws(
   () =>
     validateRouteInput({ deploymentId: 'bad/id', upstreamIp: '100.70.86.53', upstreamPort: 80 }),

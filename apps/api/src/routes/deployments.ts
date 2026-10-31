@@ -471,6 +471,20 @@ deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Respons
 
     const current = existing[0];
 
+    // Reject active workloads before touching the gateway. Operators must
+    // cancel/stop the workload explicitly; a rejected delete must not cause
+    // an otherwise healthy public route to disappear.
+    if (current.state === 'running' || current.state === 'building' || current.state === 'queued') {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'ACTIVE_DEPLOYMENT',
+          message: `Cannot delete active deployment '${id}' in state '${current.state}'. Please cancel the deployment first.`,
+        },
+      });
+      return;
+    }
+
     // Remove route from Gateway idempotently. Do not delete the database row
     // while the edge still has an unreachable-to-control-plane route.
     const routeRemoved = await gatewayClient.removeRoute(id, current.attemptId ?? undefined);
@@ -480,18 +494,6 @@ deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Respons
         error: {
           code: 'ROUTE_CLEANUP_FAILED',
           message: 'Gateway route removal failed; retry the delete operation',
-        },
-      });
-      return;
-    }
-
-    // Guard against deleting active workloads without stopping them first
-    if (current.state === 'running' || current.state === 'building' || current.state === 'queued') {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: 'ACTIVE_DEPLOYMENT',
-          message: `Cannot delete active deployment '${id}' in state '${current.state}'. Please cancel the deployment first.`,
         },
       });
       return;
