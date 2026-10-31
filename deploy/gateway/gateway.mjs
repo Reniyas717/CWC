@@ -187,7 +187,7 @@ export class QuickTunnel {
         callback(value);
       };
       const onData = (chunk) => {
-        buffer += chunk.toString();
+        buffer = `${buffer}${chunk.toString()}`.slice(-4096);
         const match = buffer.match(/https:\/\/(?!api\.)[-a-z0-9]+\.trycloudflare\.com/i);
         if (match) finish(resolve, {
           url: match[0],
@@ -252,18 +252,20 @@ export class RouteManager {
     const previous = this.routes.get(route.deploymentId);
     const listenerPort = this.listenerBase + this.nextListenerOffset;
     this.nextListenerOffset += 1;
-    const next = { ...route, listenerPort };
+    const next = { ...route, listenerPort, status: 'starting', publicUrl: undefined, retryTimer: undefined, retryAttempt: 0, cancelled: false };
     await this.caddy.apply(next);
     let tunnel;
+    let activeRecord = next;
     try {
-      tunnel = await this.tunnel.start(listenerPort, { onExit: () => this.restartTunnel(route.deploymentId).catch(() => {}) });
+      tunnel = await this.tunnel.start(listenerPort, { onExit: () => this.#scheduleRestart(route.deploymentId, activeRecord) });
     } catch (error) {
       if (previous) await this.caddy.apply(previous).catch(() => {});
       else await this.caddy.remove(route.deploymentId).catch(() => {});
       throw error;
     }
-    previous?.stopTunnel?.();
     const record = { ...next, status: 'ready', publicUrl: tunnel.url, stopTunnel: tunnel.stop };
+    activeRecord = record;
+    this.#cancelRecord(previous);
     this.routes.set(route.deploymentId, record);
     return this.#public(record);
   }
@@ -274,14 +276,46 @@ export class RouteManager {
 
   async #restartTunnel(deploymentId) {
     const record = this.routes.get(deploymentId);
-    if (!record) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
+    if (!record || record.cancelled) return;
     record.status = 'restarting';
+    record.publicUrl = undefined;
     record.stopTunnel?.();
-    const tunnel = await this.tunnel.start(record.listenerPort, { onExit: () => this.restartTunnel(deploymentId).catch(() => {}) });
-    record.stopTunnel = tunnel.stop;
-    record.publicUrl = tunnel.url;
-    record.status = 'ready';
-    return this.#public(record);
+    record.stopTunnel = undefined;
+    try {
+      const tunnel = await this.tunnel.start(record.listenerPort, { onExit: () => this.#scheduleRestart(deploymentId, record) });
+      if (record.cancelled || this.routes.get(deploymentId) !== record) {
+        tunnel.stop();
+        return;
+      }
+      record.stopTunnel = tunnel.stop;
+      record.publicUrl = tunnel.url;
+      record.retryAttempt = 0;
+      record.status = 'ready';
+      return this.#public(record);
+    } catch {
+      this.#scheduleRestart(deploymentId, record, record.retryAttempt + 1);
+    }
+  }
+
+  #scheduleRestart(deploymentId, record, attempt = 0) {
+    if (!record || record.cancelled || this.routes.get(deploymentId) !== record || record.retryTimer) return;
+    const delay = Math.min(1000 * (2 ** Math.min(attempt, 4)), 15000);
+    record.status = 'restarting';
+    record.publicUrl = undefined;
+    record.retryAttempt = attempt;
+    record.retryTimer = setTimeout(() => {
+      record.retryTimer = undefined;
+      this.restartTunnel(deploymentId).catch(() => this.#scheduleRestart(deploymentId, record, attempt + 1));
+    }, delay);
+  }
+
+  #cancelRecord(record) {
+    if (!record) return;
+    record.cancelled = true;
+    if (record.retryTimer) clearTimeout(record.retryTimer);
+    record.retryTimer = undefined;
+    record.stopTunnel?.();
+    record.stopTunnel = undefined;
   }
 
   async remove(deploymentId, { ignoreMissing = false } = {}) {
@@ -295,7 +329,7 @@ export class RouteManager {
       return;
     }
     await this.caddy.remove(deploymentId);
-    record.stopTunnel?.();
+    this.#cancelRecord(record);
     this.routes.delete(deploymentId);
   }
 
@@ -343,7 +377,7 @@ export class RouteManager {
   }
 
   async #clearRoutes() {
-    for (const record of this.routes.values()) record.stopTunnel?.();
+    for (const record of this.routes.values()) this.#cancelRecord(record);
     if (typeof this.caddy.clear === 'function') {
       await this.caddy.clear();
     } else {
@@ -415,11 +449,17 @@ export function createGatewayServer({ manager = new RouteManager(), token = proc
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const server = createGatewayServer();
+  const manager = new RouteManager();
+  const server = createGatewayServer({ manager });
   const port = Number(process.env.GATEWAY_PORT ?? 4100);
   const host = process.env.GATEWAY_BIND_HOST ?? '127.0.0.1';
   if (host !== '127.0.0.1' && !isTailscaleIpv4(host)) {
     throw new Error('GATEWAY_BIND_HOST must be 127.0.0.1 or a Tailscale IPv4 address');
   }
-  server.listen(port, host, () => console.log(`Gateway service listening on ${host}:${port}`));
+  manager.caddy.clear().then(() => {
+    server.listen(port, host, () => console.log(`Gateway service listening on ${host}:${port}`));
+  }).catch((error) => {
+    console.error(`Gateway startup failed: ${error.message}`);
+    process.exitCode = 1;
+  });
 }
