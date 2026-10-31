@@ -2,6 +2,8 @@
 
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_CADDY_ADMIN = 'http://127.0.0.1:2019';
 const DEFAULT_LISTENER_BASE = 18080;
@@ -94,7 +96,7 @@ export class CaddyAdminClient {
     try {
       result = await this.fetch(`${this.baseUrl}/load`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', origin: this.baseUrl },
         body: JSON.stringify(config),
       });
     } catch (error) {
@@ -116,7 +118,7 @@ export class CaddyAdminClient {
     try {
       result = await this.fetch(`${this.baseUrl}/load`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', origin: this.baseUrl },
         body: JSON.stringify(this.#config()),
       });
     } catch (error) {
@@ -136,7 +138,7 @@ export class CaddyAdminClient {
     try {
       result = await this.fetch(`${this.baseUrl}/load`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', origin: this.baseUrl },
         body: JSON.stringify(this.#config()),
       });
     } catch (error) {
@@ -459,7 +461,7 @@ export function createGatewayServer({ manager = new RouteManager(), token = proc
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const manager = new RouteManager();
   const server = createGatewayServer({ manager });
   const port = Number(process.env.GATEWAY_PORT ?? 4100);
