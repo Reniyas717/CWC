@@ -64,10 +64,13 @@ export class GatewayClient {
 
         const errorText = await response.text().catch(() => '');
 
-        // If upstream container is still starting, give it a moment to bind socket
-        if (response.status === 502 && attempt < maxAttempts) {
+        // A 502 normally means that the worker container is still starting.
+        // Other 5xx responses and rate limiting are also transient from the
+        // control plane's point of view (for example, a tunnel restart).
+        const retryable = response.status === 429 || response.status >= 500;
+        if (retryable && attempt < maxAttempts) {
           console.log(
-            `[GatewayClient] Upstream http://${upstreamIp}:${upstreamPort}${healthPath} not ready yet (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs}ms...`
+            `[GatewayClient] Gateway publication returned ${response.status} for ${deploymentId} (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs}ms...`
           );
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -156,36 +159,64 @@ export class GatewayClient {
       upstreamIp: string;
       upstreamPort: number;
       healthPath?: string;
-    }>
+    }>,
+    maxAttempts = 3,
+    delayMs = 1000
   ): Promise<PublishedRoute[] | null> {
-    try {
-      const response = await fetch(`${this.baseUrl}/v1/reconcile`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.token}`,
-        },
-        body: JSON.stringify({ routes }),
-        signal: AbortSignal.timeout(20000),
-      });
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await fetch(`${this.baseUrl}/v1/reconcile`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.token}`,
+          },
+          body: JSON.stringify({ routes }),
+          signal: AbortSignal.timeout(20000),
+        });
 
-      if (!response.ok) {
+        if (response.ok) {
+          const body = (await response.json()) as {
+            success?: boolean;
+            data?: PublishedRoute[];
+          };
+          if (!body.success || !Array.isArray(body.data)) {
+            console.warn('[GatewayClient] Gateway returned an invalid reconciliation response');
+            return null;
+          }
+          return body.data;
+        }
+
         const errorText = await response.text().catch(() => '');
+        const retryable = response.status === 429 || response.status >= 500;
+        if (retryable && attempt < maxAttempts) {
+          console.warn(
+            `[GatewayClient] Route reconciliation returned ${response.status} (attempt ${attempt}/${maxAttempts}). Retrying in ${delayMs}ms...`
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+
         console.warn(
           `[GatewayClient] Route reconciliation failed (${response.status}): ${errorText}`
         );
         return null;
+      } catch (error) {
+        if (attempt < maxAttempts) {
+          console.warn(
+            `[GatewayClient] Gateway reconciliation attempt ${attempt}/${maxAttempts} failed. Retrying in ${delayMs}ms...`
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+        console.warn(
+          `[GatewayClient] Unable to reach Gateway service at ${this.baseUrl} for reconciliation:`,
+          error instanceof Error ? error.message : String(error)
+        );
+        return null;
       }
-
-      const body = (await response.json()) as { success: boolean; data: PublishedRoute[] };
-      return body.data;
-    } catch (error) {
-      console.warn(
-        `[GatewayClient] Unable to reach Gateway service at ${this.baseUrl} for reconciliation:`,
-        error instanceof Error ? error.message : String(error)
-      );
-      return null;
     }
+    return null;
   }
 }
 

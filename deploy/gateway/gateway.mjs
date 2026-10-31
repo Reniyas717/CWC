@@ -510,8 +510,10 @@ export class RouteManager {
 
   /**
    * Restore routes only from the control plane's authoritative state provider.
-   * A provider failure leaves the manager empty so a stale local snapshot can
-   * never become publicly reachable after a restart.
+   * A provider failure leaves the current routes untouched: without a
+   * successful authoritative response, clearing a healthy route would cause
+   * avoidable downtime and could not be distinguished from an empty desired
+   * state. The control plane retries reconciliation on its next tick.
    */
   async reconcile(stateProvider) {
     return this.#enqueue(() => this.#reconcile(stateProvider));
@@ -526,14 +528,6 @@ export class RouteManager {
     try {
       desired = await stateProvider();
     } catch {
-      try {
-        await this.#clearRoutes();
-      } catch {
-        throw new ReconciliationError(
-          'authoritative state unavailable and stale routes could not be cleared'
-        );
-      }
-      this.routes.clear();
       throw new ReconciliationError();
     }
     if (!Array.isArray(desired)) {

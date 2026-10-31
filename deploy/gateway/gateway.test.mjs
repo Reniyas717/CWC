@@ -234,7 +234,7 @@ await assert.rejects(
   }),
   (error) => error.code === 'RECONCILIATION_UNAVAILABLE'
 );
-assert.throws(() => manager.get('restored'), /route was not found/);
+assert.equal(manager.get('api-restored').status, 'ready');
 
 assert.throws(
   () =>
