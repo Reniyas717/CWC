@@ -16,24 +16,36 @@ case "$OS" in
     if command -v tailscale >/dev/null 2>&1; then
       echo "==> Tailscale is already installed: $(tailscale version 2>/dev/null | head -n 1 || echo "installed")"
     else
-      echo "==> Installing Tailscale using official installer..."
-      if command -v curl >/dev/null 2>&1; then
-        curl -fsSL https://tailscale.com/install.sh | sh
-      elif command -v wget >/dev/null 2>&1; then
-        wget -qO- https://tailscale.com/install.sh | sh
-      else
-        echo "Error: curl or wget is required to install Tailscale." >&2
-        exit 1
+      echo "==> Installing Tailscale via pkgs.tailscale.com repository..."
+      CODENAME="${VERSION_CODENAME:-noble}"
+      
+      SUDO_CMD=""
+      if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+        SUDO_CMD="sudo"
+      fi
+
+      $SUDO_CMD mkdir -p --mode=0755 /usr/share/keyrings
+      curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.noarmor.gpg" \
+        | $SUDO_CMD tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+      curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.tailscale-keyring.list" \
+        | $SUDO_CMD tee /etc/apt/sources.list.d/tailscale.list
+
+      $SUDO_CMD apt-get update
+      $SUDO_CMD apt-get install -y tailscale
+    fi
+
+    # Ensure tailscaled service is running
+    if command -v systemctl >/dev/null 2>&1; then
+      if [ "$(id -u)" -eq 0 ]; then
+        systemctl enable --now tailscaled 2>/dev/null || true
+      elif command -v sudo >/dev/null 2>&1; then
+        sudo systemctl enable --now tailscaled 2>/dev/null || true
       fi
     fi
 
     echo "==> Starting Tailscale..."
-    if [ "$(id -u)" -eq 0 ]; then
-      tailscale up
-    elif command -v sudo >/dev/null 2>&1; then
-      sudo tailscale up
-    else
-      tailscale up
+    if command -v tailscale >/dev/null 2>&1; then
+      tailscale up --qr=false || sudo tailscale up --qr=false
     fi
     ;;
 
