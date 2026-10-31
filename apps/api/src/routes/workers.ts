@@ -1,15 +1,20 @@
 import { Router, Request, Response } from 'express';
-import { eq } from 'drizzle-orm';
+import { eq, and, or, asc, isNull } from 'drizzle-orm';
 import {
   WorkerRegistrationSchema,
   WorkerHeartbeatSchema,
   WorkerNode,
   WorkerStatusResponse,
+  DeploymentTaskPayload,
 } from '@cloud-without-clouds/shared';
 import { z } from 'zod';
 import { requireWorker, optionalAdmin } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
-import { workerNodes } from '../db/schema.js';
+import {
+  workerNodes,
+  deployments,
+  applications,
+} from '../db/schema.js';
 import {
   recordWorkerHeartbeatInCache,
   removeWorkerFromCache,
@@ -350,17 +355,95 @@ workersRouter.post('/status', requireWorker, async (req: Request, res: Response)
 
 /**
  * GET /api/v1/workers/:id/tasks
- * Worker task polling endpoint (MVP dispatch mechanism).
+ * Worker task polling endpoint (MVP pull-based task dispatch).
  */
 workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Response) => {
   const { id } = req.params;
 
-  // Phase 4 will dispatch actual deployment records from DB.
-  // For Phase 3, we return valid 200 format confirming polling readiness.
-  res.status(200).json({
-    success: true,
-    hasTask: false,
-    workerId: id,
-    message: 'Worker task polling active. No pending tasks.',
-  });
+  try {
+    // Find oldest queued deployment assigned to this worker or currently unassigned
+    const pendingDeployments = await db
+      .select()
+      .from(deployments)
+      .where(
+        and(
+          eq(deployments.state, 'queued'),
+          or(eq(deployments.workerId, id), isNull(deployments.workerId))
+        )
+      )
+      .orderBy(asc(deployments.createdAt))
+      .limit(1);
+
+    if (pendingDeployments.length === 0) {
+      res.status(200).json({
+        success: true,
+        hasTask: false,
+      });
+      return;
+    }
+
+    const dep = pendingDeployments[0];
+
+    // Fetch corresponding application details
+    const appRows = await db
+      .select()
+      .from(applications)
+      .where(eq(applications.id, dep.applicationId));
+
+    if (appRows.length === 0) {
+      res.status(200).json({
+        success: true,
+        hasTask: false,
+      });
+      return;
+    }
+
+    const app = appRows[0];
+    const now = new Date();
+
+    // Lock this task to the polling worker and transition state to 'building'
+    await db
+      .update(deployments)
+      .set({
+        workerId: id,
+        state: 'building',
+        updatedAt: now,
+      })
+      .where(eq(deployments.id, dep.id));
+
+    const taskPayload: DeploymentTaskPayload = {
+      deploymentId: dep.id,
+      applicationId: app.id,
+      git: {
+        repositoryUrl: app.repositoryUrl,
+        branch: dep.gitBranch || app.gitBranch,
+        rootDirectory: app.rootDirectory || '/',
+        commitHash: dep.gitCommitHash || undefined,
+      },
+      dockerfilePath: 'Dockerfile',
+      buildContext: '.',
+      targetPort: app.targetPort,
+      replicas: 1,
+      resourceLimits: {
+        cpuLimitCores: app.cpuLimitCores,
+        memoryLimitMb: app.memoryLimitMb,
+      },
+      env: (app.envVars as Array<{ key: string; value: string; isSecret: boolean }>) || [],
+    };
+
+    res.status(200).json({
+      success: true,
+      hasTask: true,
+      task: taskPayload,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'TASK_POLL_FAILED',
+        message: 'Failed to poll deployment tasks',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
 });

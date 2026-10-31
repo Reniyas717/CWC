@@ -51,6 +51,16 @@ const sampleStatus = {
   timestamp: new Date().toISOString(),
 };
 
+const sampleDeployment = {
+  name: 'Auth Test App',
+  framework: 'dockerfile',
+  git: {
+    repositoryUrl: 'https://github.com/cloud-without-clouds/sample-node-app.git',
+    branch: 'main',
+  },
+  port: 3000,
+};
+
 const tests = [
   { name: '1. Health endpoint (Public)', url: '/health', method: 'GET', headers: {}, expectedStatus: 200 },
 
@@ -59,10 +69,10 @@ const tests = [
   { name: '2b. Deployments POST with malformed header', url: '/api/v1/deployments', method: 'POST', headers: { Authorization: 'Basic xyz' }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '2c. Deployments POST with wrong token', url: '/api/v1/deployments', method: 'POST', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '2d. Deployments POST with worker token instead of admin', url: '/api/v1/deployments', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '2e. Deployments POST with valid admin token', url: '/api/v1/deployments', method: 'POST', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 501 },
+  { name: '2e. Deployments POST with valid admin token', url: '/api/v1/deployments', method: 'POST', headers: { Authorization: 'Bearer ' + adminToken, 'Content-Type': 'application/json' }, body: JSON.stringify(sampleDeployment), expectedStatus: 201 },
 
-  { name: '3a. Deployments CANCEL without token', url: '/api/v1/deployments/dep-1/cancel', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '3b. Deployments CANCEL with valid admin token', url: '/api/v1/deployments/dep-1/cancel', method: 'POST', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 501 },
+  { name: '3a. Deployments CANCEL without token', url: '/api/v1/deployments/dep-nonexistent/cancel', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '3b. Deployments CANCEL with valid admin token (returns 404 for unknown)', url: '/api/v1/deployments/dep-nonexistent/cancel', method: 'POST', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 404, checkCode: 'NOT_FOUND' },
 
   // Worker endpoints (Register, heartbeat, status, tasks)
   { name: '4a. Workers REGISTER without token', url: '/api/v1/workers/register', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
@@ -80,14 +90,19 @@ const tests = [
   { name: '7b. Workers TASKS poll with wrong token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '7c. Workers TASKS poll with valid worker token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 200 },
 
-  // Optional admin endpoints (GET /deployments, GET /workers)
-  { name: '8a. Deployments GET without token (dev mode open)', url: '/api/v1/deployments', method: 'GET', headers: {}, expectedStatus: 200 },
-  { name: '8b. Deployments GET with wrong token (rejected)', url: '/api/v1/deployments', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '8c. Deployments GET with valid admin token', url: '/api/v1/deployments', method: 'GET', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 200 },
+  // Internal worker reporting endpoints
+  { name: '8a. Internal result reporting without token', url: '/api/v1/internal/deployments/dep-nonexistent/result', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '8b. Internal result reporting with admin token (worker required)', url: '/api/v1/internal/deployments/dep-nonexistent/result', method: 'POST', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '8c. Internal logs reporting without token', url: '/api/v1/internal/deployments/dep-nonexistent/logs', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
 
-  { name: '9a. Workers GET without token (dev mode open)', url: '/api/v1/workers', method: 'GET', headers: {}, expectedStatus: 200 },
-  { name: '9b. Workers GET with wrong token (rejected)', url: '/api/v1/workers', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '9c. Workers GET with valid admin token', url: '/api/v1/workers', method: 'GET', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 200 },
+  // Optional admin endpoints (GET /deployments, GET /workers)
+  { name: '9a. Deployments GET without token (dev mode open)', url: '/api/v1/deployments', method: 'GET', headers: {}, expectedStatus: 200 },
+  { name: '9b. Deployments GET with wrong token (rejected)', url: '/api/v1/deployments', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '9c. Deployments GET with valid admin token', url: '/api/v1/deployments', method: 'GET', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 200 },
+
+  { name: '10a. Workers GET without token (dev mode open)', url: '/api/v1/workers', method: 'GET', headers: {}, expectedStatus: 200 },
+  { name: '10b. Workers GET with wrong token (rejected)', url: '/api/v1/workers', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '10c. Workers GET with valid admin token', url: '/api/v1/workers', method: 'GET', headers: { Authorization: 'Bearer ' + adminToken }, expectedStatus: 200 },
 ];
 
 async function main() {

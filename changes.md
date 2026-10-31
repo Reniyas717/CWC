@@ -266,3 +266,85 @@ Implemented and verified the following endpoints:
   - `pnpm check-types` passed with 0 errors.
   - `pnpm lint` passed with 0 errors.
   - `pnpm --filter @cloud-without-clouds/api build` compiled successfully.
+
+
+---
+
+# Changes & Implementation Log: Phase 4 — Deployment CRUD, Task Polling & Result Reporting
+
+## 1. Overview & Objectives
+
+In **Phase 4**, we implemented the core orchestration lifecycle for deployments on the Control Plane API (`apps/api`):
+- Deployment submission and queuing endpoint (`POST /api/v1/deployments`) with automatic application creation, slug resolution, and candidate worker assignment.
+- Read-only querying endpoints for deployments and build/runtime log history (`GET /api/v1/deployments`, `GET /api/v1/deployments/:id`, `GET /api/v1/deployments/:id/logs`).
+- Deployment cancellation endpoint (`POST /api/v1/deployments/:id/cancel`) for in-flight tasks.
+- Pull-based task polling endpoint (`GET /api/v1/workers/:id/tasks`) enabling distributed worker nodes to fetch tasks FIFO, transition deployment state to `'building'`, and receive complete `DeploymentTaskPayload` objects.
+- Internal worker feedback routes (`/api/v1/internal/deployments`) allowing worker agents to stream build logs and report container runtime results (assigned port, container ID, running/failed status).
+- Event audit logging in `deployment_events` for lifecycle visibility (`SCHEDULED`, `CONTAINER_START`, `FAILED`, `CANCELLED`).
+
+---
+
+## 2. API Routes Implemented
+
+### 1. Deployment Management (`apps/api/src/routes/deployments.ts`)
+- **`POST /api/v1/deployments`** (`requireAdmin`):
+  - Validates payload against `CreateDeploymentInputSchema` (repository URL, branch, framework, target port, env variables, CPU/memory limits).
+  - Guarantees default admin user existence via `ensureDefaultAdminUser()`.
+  - Reuses or creates an `applications` record with unique slug derivation.
+  - Selects an eligible worker node (`idle` or `busy` with lowest active container load) if none specified.
+  - Computes sequential version number for the application.
+  - Creates deployment record in state `'queued'`.
+  - Emits `SCHEDULED` discrete audit event in `deployment_events`.
+  - Returns canonical `Deployment` model with HTTP 201 Created.
+- **`GET /api/v1/deployments`** (`optionalAdmin`):
+  - Lists deployments with optional `applicationId` query filtering, ordered newest first (`createdAt DESC`).
+- **`GET /api/v1/deployments/:id`** (`optionalAdmin`):
+  - Retrieves full deployment details or returns 404 if not found.
+- **`GET /api/v1/deployments/:id/logs`** (`optionalAdmin`):
+  - Streams chronological log entries for the deployment from PostgreSQL `deployment_logs`.
+- **`POST /api/v1/deployments/:id/cancel`** (`requireAdmin`):
+  - Cancels an active or queued deployment.
+  - Rejects cancellation if already in terminal state (`stopped`, `failed`, `cancelled`).
+  - Sets state to `'cancelled'`, sets `finishedAt`, and records `CANCELLED` audit event.
+
+### 2. Worker Task Dispatch (`apps/api/src/routes/workers.ts`)
+- **`GET /api/v1/workers/:id/tasks`** (`requireWorker`):
+  - Pull-based FIFO scheduler matching tasks assigned directly to the worker or unassigned queued tasks.
+  - Locks the selected deployment to the polling worker node and immediately advances status from `'queued'` to `'building'` to prevent double-pickup.
+  - Fetches associated application configuration and constructs a complete `DeploymentTaskPayload` (`git`, `dockerfilePath`, `buildContext`, `targetPort`, `resourceLimits`, `env`).
+  - Returns `{ success: true, hasTask: true, task }` or `{ success: true, hasTask: false }`.
+
+### 3. Internal Worker Ingestion (`apps/api/src/routes/internal-deployments.ts`)
+- Mounted under `/api/v1/internal/deployments` and guarded by `requireWorker`:
+- **`POST /:id/result`**:
+  - Validates payload with `DeploymentResultPayloadSchema`.
+  - Updates deployment state (`running`, `failed`, `stopped`), records `containerId`, `assignedPort`, `publicUrl`, `errorMessage`, and updates `startedAt` / `finishedAt`.
+  - Updates worker node telemetry in PostgreSQL (`activeContainers = active_containers + 1`, state = `'busy'`).
+  - Inserts audit event (`CONTAINER_START`, `FAILED`, `STOPPED`).
+- **`POST /:id/logs`**:
+  - Validates payload with `DeploymentLogsPayloadSchema`.
+  - Inserts log batch into `deployment_logs` table (`stream`, `level`, `message`, `timestamp`).
+
+---
+
+## 3. Verification & Quality Assurance
+
+1. **Auth & Security Test Suite (`apps/api/test-auth.js`)**:
+   - Expanded from 25 to 28 tests covering all endpoints, including internal worker result/logs routes.
+   - Result: **28 passed, 0 failed**.
+2. **End-to-End Integration Test Suite (`apps/api/test-phase4.js`)**:
+   - Automated 18-step verification against live server, PostgreSQL, and Redis:
+     - Worker registration.
+     - Deployment creation (`queued` state).
+     - Worker task polling & task delivery.
+     - State transition verification (`queued` -> `building`).
+     - Worker log batch streaming & retrieval via `GET /logs`.
+     - Worker container result submission (`running`, port `49152`, container ID).
+     - Database state inspection confirming `running` status and assigned host port.
+     - Worker subsequent task polling returning `hasTask: false`.
+     - Deployment cancellation lifecycle verification.
+   - Result: **18 passed, 0 failed**.
+3. **Static Analysis & Build**:
+   - `pnpm check-types`: 0 errors across all 4 monorepo packages.
+   - `pnpm lint`: 0 ESLint errors.
+   - `pnpm --filter @cloud-without-clouds/api build`: Compiled ESM bundle successfully.
