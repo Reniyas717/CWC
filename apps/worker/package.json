@@ -9,7 +9,8 @@
     "build": "tsup src/index.ts --format esm --out-dir dist",
     "start": "node dist/index.js",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test:runtime": "tsx src/test-docker-runtime.ts"
   },
   "dependencies": {
     "@cloud-without-clouds/shared": "workspace:*",
