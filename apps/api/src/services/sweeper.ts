@@ -8,6 +8,8 @@ import { reconcileGatewayRoutes } from './gateway-reconciliation.js';
 export interface SweepResult {
   offlineWorkers: string[];
   rescheduledDeployments: string[];
+  scheduledDeployments: string[];
+  awaitingCapacityDeployments: string[];
   failedDeployments: string[];
   timestamp: string;
 }
@@ -36,9 +38,12 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
   const result: SweepResult = {
     offlineWorkers: [],
     rescheduledDeployments: [],
+    scheduledDeployments: [],
+    awaitingCapacityDeployments: [],
     failedDeployments: [],
     timestamp: now.toISOString(),
   };
+  const routeCleanupTasks: Promise<unknown>[] = [];
 
   try {
     // Terminal deployments whose last gateway cleanup failed remain visible
@@ -168,7 +173,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             `[Recovery] Deployment '${dep.id}' auto-rescheduled to queued (retry ${nextRetry}/${MAX_RETRY_COUNT}).`
           );
           result.rescheduledDeployments.push(dep.id);
-          void removeDeploymentRoute({
+          routeCleanupTasks.push(removeDeploymentRoute({
             deploymentId: dep.id,
             gatewayAttemptId: previousAttemptId,
             currentAttemptId: null,
@@ -178,7 +183,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
               `[Sweeper] Route cleanup failed for rescheduled deployment ${dep.id}:`,
               error instanceof Error ? error.message : String(error)
             );
-          });
+          }));
         } else {
           // Exceeded retry count - mark failed
           await db
@@ -207,7 +212,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             `[Recovery] Deployment '${dep.id}' marked FAILED: max retries (${MAX_RETRY_COUNT}) exceeded.`
           );
           result.failedDeployments.push(dep.id);
-          void removeDeploymentRoute({
+          routeCleanupTasks.push(removeDeploymentRoute({
             deploymentId: dep.id,
             gatewayAttemptId: previousAttemptId,
             currentAttemptId: null,
@@ -217,9 +222,40 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
               `[Sweeper] Route cleanup failed for failed deployment ${dep.id}:`,
               error instanceof Error ? error.message : String(error)
             );
-          });
+          }));
         }
       }
+    }
+
+    // Route cleanup is attempt-guarded, so it is safe to finish before a
+    // replacement is assigned. This gives operators a deterministic recovery
+    // boundary: the old route is either gone or marked for retry before the
+    // next worker is allowed to claim the deployment.
+    await Promise.all(routeCleanupTasks);
+
+    // Requeueing alone leaves the deployment stranded until a worker happens
+    // to send another heartbeat. Re-evaluate placement now so any eligible
+    // worker can claim the replacement during this same recovery sweep. Use a
+    // dynamic import to keep the scheduler's heartbeat-constant dependency
+    // from becoming a module-initialization cycle.
+    const { schedulePendingDeployments } = await import('./scheduler.js');
+    await schedulePendingDeployments();
+
+    if (result.rescheduledDeployments.length > 0) {
+      const scheduled = await db
+        .select({ id: deployments.id })
+        .from(deployments)
+        .where(
+          and(
+            inArray(deployments.id, result.rescheduledDeployments),
+            eq(deployments.state, 'queued'),
+            isNotNull(deployments.workerId)
+          )
+        );
+      result.scheduledDeployments = scheduled.map(({ id }) => id);
+      result.awaitingCapacityDeployments = result.rescheduledDeployments.filter(
+        (id) => !result.scheduledDeployments.includes(id)
+      );
     }
   } catch (error) {
     console.error('[Sweeper] Error during worker health sweep:', error);
