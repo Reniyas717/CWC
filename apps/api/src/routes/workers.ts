@@ -28,20 +28,25 @@ export const workersRouter: Router = Router();
  * Maps a database row from `worker_nodes` to the canonical `WorkerNode` interface.
  */
 function mapWorkerRowToNode(row: typeof workerNodes.$inferSelect): WorkerNode {
+  const isHeartbeatExpired =
+    Date.now() - new Date(row.lastHeartbeatAt).getTime() > 30_000;
+  const effectiveState =
+    row.state !== 'draining' && isHeartbeatExpired ? 'offline' : row.state;
+
   return {
     id: row.id,
     name: row.name,
     hostname: row.hostname,
     ipAddress: row.ipAddress,
     port: row.port,
-    state: row.state,
+    state: effectiveState,
     resources: {
       cpuCount: row.cpuCores,
       cpuUsagePercent: row.cpuUsagePercent,
       totalMemoryMb: row.totalMemoryMb,
       freeMemoryMb: row.freeMemoryMb,
       usedMemoryMb: row.usedMemoryMb,
-      activeContainers: row.activeContainers,
+      activeContainers: effectiveState === 'offline' ? 0 : row.activeContainers,
     },
     limits: {
       maxConcurrentWorkloads: row.maxConcurrentWorkloads,

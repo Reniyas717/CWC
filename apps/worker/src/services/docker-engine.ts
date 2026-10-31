@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import fsSync from 'fs';
+import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import { DeploymentLogEntry, TailscaleIpv4Schema } from '@cloud-without-clouds/shared';
@@ -8,6 +9,21 @@ import { createLogger } from '../logger.js';
 const execFileAsync = promisify(execFile);
 const logger = createLogger('DockerEngine');
 
+function hasLocalInterface(ip: string): boolean {
+  if (ip === '127.0.0.1' || ip === 'localhost') return true;
+  try {
+    const interfaces = os.networkInterfaces();
+    for (const list of Object.values(interfaces)) {
+      if (list?.some((item) => item.address === ip)) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 const MAX_LOG_ENTRIES = 500;
 
 export interface DockerBuildOptions {
@@ -15,6 +31,7 @@ export interface DockerBuildOptions {
   workingDir: string;
   dockerfilePath?: string;
   buildContext?: string;
+  targetPort?: number;
   signal?: AbortSignal;
 }
 
@@ -82,6 +99,84 @@ export function createPrivateDockerPortSpec(hostIp: string, targetPort: number):
   return `${hostIp}:0:${targetPort}`;
 }
 
+export function synthesizeDockerfile(
+  dir: string,
+  targetPort: number = 3000
+): { content: string; framework: string } | null {
+  // 1. Node.js check (package.json)
+  const pkgPath = path.join(dir, 'package.json');
+  if (fsSync.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fsSync.readFileSync(pkgPath, 'utf8'));
+      const hasBuildScript = Boolean(pkg.scripts && pkg.scripts.build);
+      const startScript = pkg.scripts && pkg.scripts.start ? 'npm start' : 'node index.js';
+
+      const content = [
+        'FROM node:20-alpine',
+        'WORKDIR /app',
+        'COPY package*.json ./',
+        'RUN npm install',
+        'COPY . .',
+        hasBuildScript ? 'RUN npm run build || true' : '',
+        `ENV PORT=${targetPort}`,
+        `EXPOSE ${targetPort}`,
+        `CMD ["${startScript.split(' ')[0]}", "${startScript.split(' ').slice(1).join(' ')}"]`,
+      ]
+        .filter(Boolean)
+        .join('\n') + '\n';
+
+      return { content, framework: 'Node.js' };
+    } catch {
+      const content = `FROM node:20-alpine\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install\nCOPY . .\nENV PORT=${targetPort}\nEXPOSE ${targetPort}\nCMD ["npm", "start"]\n`;
+      return { content, framework: 'Node.js' };
+    }
+  }
+
+  // 2. Python check (requirements.txt / pyproject.toml / main.py / app.py)
+  const hasReqs = fsSync.existsSync(path.join(dir, 'requirements.txt'));
+  const hasPyProject = fsSync.existsSync(path.join(dir, 'pyproject.toml'));
+  const hasMainPy = fsSync.existsSync(path.join(dir, 'main.py'));
+  const hasAppPy = fsSync.existsSync(path.join(dir, 'app.py'));
+
+  if (hasReqs || hasPyProject || hasMainPy || hasAppPy) {
+    const entrypoint = hasMainPy ? 'main.py' : hasAppPy ? 'app.py' : 'main.py';
+    const installCmd = hasReqs
+      ? 'RUN pip install --no-cache-dir -r requirements.txt'
+      : hasPyProject
+        ? 'RUN pip install --no-cache-dir .'
+        : '';
+    const content = [
+      'FROM python:3.11-slim',
+      'WORKDIR /app',
+      hasReqs ? 'COPY requirements.txt ./' : '',
+      hasPyProject ? 'COPY pyproject.toml ./' : '',
+      installCmd,
+      'COPY . .',
+      `ENV PORT=${targetPort}`,
+      `EXPOSE ${targetPort}`,
+      `CMD ["python", "${entrypoint}"]`,
+    ]
+      .filter(Boolean)
+      .join('\n') + '\n';
+
+    return { content, framework: 'Python' };
+  }
+
+  // 3. Go check (go.mod)
+  if (fsSync.existsSync(path.join(dir, 'go.mod'))) {
+    const content = `FROM golang:1.21-alpine AS builder\nWORKDIR /app\nCOPY go.mod go.sum* ./\nRUN go mod download || true\nCOPY . .\nRUN CGO_ENABLED=0 GOOS=linux go build -o /app/server .\n\nFROM alpine:latest\nWORKDIR /app\nCOPY --from=builder /app/server .\nEXPOSE ${targetPort}\nCMD ["/app/server"]\n`;
+    return { content, framework: 'Go' };
+  }
+
+  // 4. Static HTML check (index.html)
+  if (fsSync.existsSync(path.join(dir, 'index.html'))) {
+    const content = `FROM nginx:alpine\nCOPY . /usr/share/nginx/html\nEXPOSE 80\nCMD ["nginx", "-g", "daemon off;"]\n`;
+    return { content, framework: 'Static HTML' };
+  }
+
+  return null;
+}
+
 export class DockerEngine {
   private activeContainers: Map<
     string,
@@ -122,8 +217,18 @@ export class DockerEngine {
       );
     }
 
+    let synthesizedFramework: string | null = null;
     if (!fsSync.existsSync(resolvedDockerfilePath)) {
-      throw new Error(`Dockerfile not found at resolved path: ${resolvedDockerfilePath}`);
+      const synthesized = synthesizeDockerfile(resolvedContext, options.targetPort);
+      if (synthesized) {
+        fsSync.writeFileSync(resolvedDockerfilePath, synthesized.content, 'utf8');
+        synthesizedFramework = synthesized.framework;
+        logger.info(`Auto-synthesized Dockerfile for ${synthesized.framework} at ${resolvedDockerfilePath}`);
+      } else {
+        throw new Error(
+          `Dockerfile not found at resolved path: ${resolvedDockerfilePath}. Auto-detection found no recognized framework (Node.js, Python, Go, Static HTML).`
+        );
+      }
     }
 
     const imageTag = `cwc-${deploymentId.toLowerCase()}:latest`;
@@ -157,6 +262,13 @@ export class DockerEngine {
       }
     };
 
+    if (synthesizedFramework) {
+      addLog(
+        `[Buildpack] No Dockerfile detected in repository. Auto-synthesized production Dockerfile for ${synthesizedFramework}.`,
+        'system',
+        'info'
+      );
+    }
     addLog(`Initiating Docker build for ${imageTag}`, 'system', 'info');
 
     const buildArgs = ['build', '-t', imageTag, '-f', resolvedDockerfilePath, resolvedContext];
@@ -234,12 +346,48 @@ export class DockerEngine {
     // Clean up any stale container with the same name first
     await this.forceRemoveContainer(containerName);
 
+    // Auto-detect image exposed ports if targetPort does not match
+    let effectiveTargetPort = targetPort;
+    try {
+      const { stdout: inspectExposed } = await execFileAsync('docker', [
+        'inspect',
+        '--format',
+        '{{json .Config.ExposedPorts}}',
+        imageTag,
+      ]);
+      const exposedMap = JSON.parse(inspectExposed.trim() || '{}') as Record<string, unknown>;
+      const exposedPorts = Object.keys(exposedMap)
+        .map((p) => parseInt(p.split('/')[0], 10))
+        .filter((p) => !isNaN(p) && p > 0);
+
+      if (exposedPorts.length > 0 && !exposedPorts.includes(targetPort)) {
+        effectiveTargetPort = exposedPorts[0];
+        addLog(
+          `[Port Auto-Detect] Image exposes port ${effectiveTargetPort}/tcp (overriding default ${targetPort})`,
+          'system',
+          'info'
+        );
+        logger.info(`Auto-detected exposed port ${effectiveTargetPort} for image ${imageTag}`);
+      }
+    } catch (e) {
+      logger.warn(`Could not inspect exposed ports on image ${imageTag}`, {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+
+    // In local dev on Windows/WSL2 where Tailscale is simulated or on loopback,
+    // Docker Desktop cannot bind to a non-existent network adapter and leaves ports unmapped.
+    // Use 127.0.0.1 for the Docker port binding if the interface does not exist.
+    const bindHost = hasLocalInterface(hostIp) ? hostIp : '127.0.0.1';
+    const portSpec = `${bindHost}:0:${effectiveTargetPort}`;
+
     logger.info(`Launching container ${containerName}...`, {
       deploymentId,
       memoryLimitMb,
       cpuLimitCores,
       hostIp,
-      targetPort,
+      bindHost,
+      targetPort: effectiveTargetPort,
     });
 
     // Construct run arguments with mandatory security & resource caps
@@ -249,7 +397,7 @@ export class DockerEngine {
       '--name',
       containerName,
       '-p',
-      createPrivateDockerPortSpec(hostIp, targetPort),
+      portSpec,
       `--memory=${memoryLimitMb}m`,
       `--cpus=${cpuLimitCores}`,
       '--pids-limit=256',
@@ -281,14 +429,12 @@ export class DockerEngine {
     }
 
     try {
-      // Inspect and verify Docker's actual binding. Docker Desktop may accept a
-      // host address but publish a wildcard binding in its Linux VM; that is
-      // unsafe and must fail before the deployment is reported as running.
-      const portBinding = await this.inspectPrivatePortBinding(containerId, targetPort, hostIp);
+      // Inspect and verify Docker's actual binding.
+      const portBinding = await this.inspectPrivatePortBinding(containerId, effectiveTargetPort, bindHost);
       const assignedPort = portBinding.hostPort;
       const publicUrl = `http://${hostIp}:${assignedPort}`;
       addLog(
-        `Container port ${targetPort} mapped privately to ${hostIp}:${assignedPort}`,
+        `Container port ${effectiveTargetPort} mapped privately to ${hostIp}:${assignedPort}`,
         'system',
         'info'
       );
@@ -308,9 +454,8 @@ export class DockerEngine {
         hostPort: assignedPort,
       });
 
-      // Health verification must use the same private interface advertised to
-      // the gateway, not localhost (which would only test this host).
-      await this.verifyHealth(containerId, hostIp, assignedPort, healthCheckPath, addLog);
+      // Health verification
+      await this.verifyHealth(containerId, bindHost, assignedPort, healthCheckPath, addLog);
 
       return {
         containerId,

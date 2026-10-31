@@ -178,28 +178,28 @@ export class CaddyAdminClient {
     const previous = this.routes;
     this.routes = new Map();
     let result;
-    try {
-      result = await this.fetch(`${this.baseUrl}/load`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: this.baseUrl },
-        body: JSON.stringify(this.#config()),
-      });
-    } catch (error) {
-      this.routes = previous;
-      throw new GatewayError(
-        502,
-        'CADDY_UPDATE_FAILED',
-        `Caddy route reset failed: ${error.message}`
-      );
+    let lastError;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        result = await this.fetch(`${this.baseUrl}/load`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: this.baseUrl },
+          body: JSON.stringify(this.#config()),
+        });
+        if (result && result.ok) {
+          return;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+      await new Promise((r) => setTimeout(r, 400));
     }
-    if (!result.ok) {
-      this.routes = previous;
-      throw new GatewayError(
-        502,
-        'CADDY_UPDATE_FAILED',
-        `Caddy rejected route reset (${result.status})`
-      );
-    }
+    this.routes = previous;
+    throw new GatewayError(
+      502,
+      'CADDY_UPDATE_FAILED',
+      `Caddy route reset failed: ${lastError?.message || result?.status || 'unknown error'}`
+    );
   }
 
   #config() {
@@ -228,7 +228,7 @@ export class CaddyAdminClient {
         ],
       };
     }
-    return { admin: { listen: '127.0.0.1:2019' }, apps: { http: { servers } } };
+    return { admin: { listen: '127.0.0.1:2019', enforce_origin: false }, apps: { http: { servers } } };
   }
 }
 
@@ -711,9 +711,13 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (host !== '127.0.0.1' && !isTailscaleIpv4(host)) {
     throw new Error('GATEWAY_BIND_HOST must be 127.0.0.1 or a Tailscale IPv4 address');
   }
+  let caddyProcess = null;
   async function ensureCaddyRunning() {
     try {
-      const res = await fetch('http://127.0.0.1:2019/config/', { signal: AbortSignal.timeout(1000) });
+      const res = await fetch('http://127.0.0.1:2019/config/', {
+        headers: { Origin: 'http://127.0.0.1:2019' },
+        signal: AbortSignal.timeout(1000),
+      });
       if (res.ok) return;
     } catch {
       // Caddy not reachable yet
@@ -721,21 +725,42 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     const caddyBin = process.platform === 'win32' ? resolve('deploy/bin/caddy.exe') : 'caddy';
     const configPath = resolve('deploy/caddy-initial.json');
     if (existsSync(caddyBin)) {
-      console.log('[Gateway] Auto-starting Caddy reverse proxy on 127.0.0.1:2019...');
-      const child = spawn(caddyBin, ['run', '--config', configPath], {
-        stdio: 'ignore',
-        detached: true,
+      console.log('[Gateway] Starting Caddy reverse proxy on 127.0.0.1:2019...');
+      caddyProcess = spawn(caddyBin, ['run', '--config', configPath], {
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-      child.unref();
-      for (let i = 0; i < 30; i++) {
-        await new Promise((r) => setTimeout(r, 150));
+      caddyProcess.stderr.on('data', (d) => {
+        const msg = d.toString().trim();
+        if (msg.includes('error') || msg.includes('ERROR')) {
+          console.error('[Caddy]', msg);
+        }
+      });
+      caddyProcess.on('exit', (code) => {
+        if (code !== 0 && code !== null) {
+          console.warn(`[Caddy] Exited with code ${code}`);
+        }
+      });
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => setTimeout(r, 250));
         try {
-          const res = await fetch('http://127.0.0.1:2019/config/', { signal: AbortSignal.timeout(500) });
+          const res = await fetch('http://127.0.0.1:2019/config/', {
+            headers: { Origin: 'http://127.0.0.1:2019' },
+            signal: AbortSignal.timeout(500),
+          });
           if (res.ok) return;
         } catch {}
       }
     }
   }
+
+  process.on('SIGINT', () => {
+    if (caddyProcess) caddyProcess.kill();
+    process.exit(0);
+  });
+  process.on('SIGTERM', () => {
+    if (caddyProcess) caddyProcess.kill();
+    process.exit(0);
+  });
 
   ensureCaddyRunning()
     .then(() => manager.caddy.clear())

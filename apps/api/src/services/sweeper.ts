@@ -367,6 +367,41 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
       result.scheduledDeployments = [];
       result.awaitingCapacityDeployments = result.rescheduledDeployments;
     }
+
+    // 3. Stale in-flight deployment sweep (Build Timeout Recovery)
+    // Any deployment in 'building' or 'deploying' for more than 5 minutes
+    // has exceeded the build timeout and must be marked failed.
+    const buildCutoff = new Date(now.getTime() - 5 * 60 * 1000);
+    const staleInFlight = await db
+      .select()
+      .from(deployments)
+      .where(
+        and(
+          inArray(deployments.state, ['building', 'deploying']),
+          lt(deployments.updatedAt, buildCutoff)
+        )
+      );
+
+    for (const dep of staleInFlight) {
+      await db
+        .update(deployments)
+        .set({
+          state: 'failed',
+          errorMessage: 'Build timed out after 5 minutes; worker did not report completion',
+          finishedAt: now,
+          updatedAt: now,
+        })
+        .where(eq(deployments.id, dep.id));
+
+      await db.insert(deploymentEvents).values({
+        deploymentId: dep.id,
+        eventType: 'FAILED',
+        details: 'Build timed out after 5 minutes without completion report',
+        timestamp: now,
+      });
+
+      console.warn(`[Sweeper] Marked stale building deployment '${dep.id}' as FAILED (timed out).`);
+    }
   } catch (error) {
     console.error('[Sweeper] Error during worker health sweep:', error);
   }
