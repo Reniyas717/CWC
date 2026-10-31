@@ -78,6 +78,7 @@ async function runPhase6Tests() {
         id: workerAId,
         name: 'Light Load Worker A',
         hostname: 'host-a',
+        ipAddress: '100.100.0.8',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -130,6 +131,7 @@ async function runPhase6Tests() {
         id: workerBId,
         name: 'Heavy Load Worker B',
         hostname: 'host-b',
+        ipAddress: '100.100.0.9',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -190,6 +192,7 @@ async function runPhase6Tests() {
         id: workerCId,
         name: 'Tie Candidate C (Higher Free RAM)',
         hostname: 'host-c',
+        ipAddress: '100.100.0.10',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -213,6 +216,7 @@ async function runPhase6Tests() {
         id: workerDId,
         name: 'Tie Candidate D (Lower Free RAM)',
         hostname: 'host-d',
+        ipAddress: '100.100.0.11',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -267,6 +271,7 @@ async function runPhase6Tests() {
         id: workerRamFailId,
         name: 'RAM Depleted Worker',
         hostname: 'host-lowram',
+        ipAddress: '100.100.0.12',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -290,6 +295,7 @@ async function runPhase6Tests() {
         id: workerCapFailId,
         name: 'Capacity Full Worker',
         hostname: 'host-full',
+        ipAddress: '100.100.0.13',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -365,6 +371,7 @@ async function runPhase6Tests() {
         id: freshWorkerId,
         name: 'Fresh Rescue Worker',
         hostname: 'fresh-host',
+        ipAddress: '100.100.0.14',
         port: 5001,
         authToken: workerToken,
         resources: {
