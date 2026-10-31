@@ -17,7 +17,7 @@ import {
   Layers,
   Sparkles,
 } from 'lucide-react';
-import { Deployment, WorkerNode } from '@cloud-without-clouds/shared';
+import { Deployment, WorkerNode, AppConfig } from '@cloud-without-clouds/shared';
 import { api, ClusterRebalanceResult } from '@/services/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -75,8 +75,8 @@ export function EqualizerPage() {
       const freeRamMb = Math.max(w.resources?.freeMemoryMb ?? 0, 0);
       const freeRamGb = (freeRamMb / 1024).toFixed(1);
 
-      // Total memory reserved by apps on this node (512 MB per container default)
-      const allocatedMb = nodeDeployments.length * 512;
+      // Total memory reserved by apps on this node (using exact app resource limits)
+      const allocatedMb = nodeDeployments.reduce((sum, d) => sum + getAppMemoryMb(d.applicationId), 0);
       const allocatedGb = (allocatedMb / 1024).toFixed(1);
       const loadPercentage = Math.min(100, Math.round((allocatedMb / totalRamMb) * 100));
 
@@ -474,7 +474,7 @@ export function EqualizerPage() {
                                   {dep.applicationId}
                                 </p>
                                 <p className="text-[10px] text-muted-foreground font-mono">
-                                  Port {dep.assignedPort || 3000} • 512 MB
+                                  Port {dep.assignedPort || 3000} • {getAppMemoryMb(dep.applicationId)} MB RAM
                                 </p>
                               </div>
 
@@ -520,6 +520,7 @@ export function EqualizerPage() {
       <RelocateWorkloadModal
         deployment={selectedRelocateDep}
         workers={workers}
+        memoryMb={selectedRelocateDep ? getAppMemoryMb(selectedRelocateDep.applicationId) : 512}
         isOpen={!!selectedRelocateDep}
         onClose={() => setSelectedRelocateDep(null)}
         onSuccess={() => {

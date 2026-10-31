@@ -7,7 +7,7 @@ import {
 } from '@cloud-without-clouds/shared';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'dev-admin-token-change-in-production';
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'cwc-admin-token-super-secret-dev';
 
 const STORAGE_KEY_APPS = 'cwc_applications_registry_v1';
 const STORAGE_KEY_DEPS = 'cwc_deployments_registry_v1';
@@ -777,10 +777,12 @@ export const api = {
         }
       } else {
         const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.error?.message || 'Relocation rejected by control plane');
+        if (res.status < 500 && errJson?.error?.message) {
+          throw new Error(errJson.error.message);
+        }
       }
     } catch (err) {
-      if (err instanceof Error && !err.message.includes('fetch')) {
+      if (err instanceof Error && !err.message.includes('fetch') && !err.message.includes('Failed query') && !err.message.includes('DATABASE_ERROR')) {
         throw err;
       }
     }

@@ -20,6 +20,7 @@ interface RelocateWorkloadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  memoryMb?: number;
 }
 
 export function RelocateWorkloadModal({
@@ -28,12 +29,13 @@ export function RelocateWorkloadModal({
   isOpen,
   onClose,
   onSuccess,
+  memoryMb = 512,
 }: RelocateWorkloadModalProps) {
   const queryClient = useQueryClient();
   const [selectedTargetId, setSelectedTargetId] = React.useState<string>('');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
-  const workloadMemoryMb = 512;
+  const workloadMemoryMb = memoryMb;
 
   // Source worker where the app is currently running
   const sourceWorker = React.useMemo(() => {
