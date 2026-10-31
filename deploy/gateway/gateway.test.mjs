@@ -127,6 +127,12 @@ const caddyClient = new CaddyAdminClient('http://127.0.0.1:2019', async (_url, o
 await caddyClient.apply({ deploymentId: 'config-check', listenerPort: 19001, upstreamIp: '100.70.86.53', upstreamPort: 8080, healthPath: '/health' });
 const caddyRoute = caddyConfig.apps.http.servers['cwc-config-check'].routes[0].handle[0];
 assert.deepEqual(caddyRoute.health_checks.active, { uri: '/health', interval: '5s', timeout: '2s' });
+const failingCaddy = new CaddyAdminClient('http://127.0.0.1:2019', async () => { throw new Error('connection reset'); });
+await assert.rejects(
+  failingCaddy.apply({ deploymentId: 'rollback-check', listenerPort: 19003, upstreamIp: '100.70.86.53', upstreamPort: 8080, healthPath: '/' }),
+  (error) => error.code === 'CADDY_UPDATE_FAILED',
+);
+assert.equal(failingCaddy.routes.get('rollback-check'), undefined);
 
 const tunnelOutput = new PassThrough();
 const tunnelErrors = new PassThrough();

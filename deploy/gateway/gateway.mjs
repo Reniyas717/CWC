@@ -79,11 +79,18 @@ export class CaddyAdminClient {
     const previous = this.routes.get(route.deploymentId);
     this.routes.set(route.deploymentId, route);
     const config = this.#config();
-    const result = await this.fetch(`${this.baseUrl}/load`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(config),
-    });
+    let result;
+    try {
+      result = await this.fetch(`${this.baseUrl}/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+    } catch (error) {
+      if (previous) this.routes.set(route.deploymentId, previous);
+      else this.routes.delete(route.deploymentId);
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy update failed: ${error.message}`);
+    }
     if (!result.ok) {
       if (previous) this.routes.set(route.deploymentId, previous);
       else this.routes.delete(route.deploymentId);
@@ -94,11 +101,17 @@ export class CaddyAdminClient {
   async remove(deploymentId) {
     const previous = this.routes.get(deploymentId);
     this.routes.delete(deploymentId);
-    const result = await this.fetch(`${this.baseUrl}/load`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(this.#config()),
-    });
+    let result;
+    try {
+      result = await this.fetch(`${this.baseUrl}/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(this.#config()),
+      });
+    } catch (error) {
+      if (previous) this.routes.set(deploymentId, previous);
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy route removal failed: ${error.message}`);
+    }
     if (!result.ok) {
       if (previous) this.routes.set(deploymentId, previous);
       throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected the route removal (${result.status})`);
@@ -108,11 +121,17 @@ export class CaddyAdminClient {
   async clear() {
     const previous = this.routes;
     this.routes = new Map();
-    const result = await this.fetch(`${this.baseUrl}/load`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(this.#config()),
-    });
+    let result;
+    try {
+      result = await this.fetch(`${this.baseUrl}/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(this.#config()),
+      });
+    } catch (error) {
+      this.routes = previous;
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy route reset failed: ${error.message}`);
+    }
     if (!result.ok) {
       this.routes = previous;
       throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected route reset (${result.status})`);
