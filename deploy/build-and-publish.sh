@@ -92,8 +92,43 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
-  fail docker "Docker daemon is unavailable; start Docker and try again"
+ensure_docker_daemon() {
+  if docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
+    log "Docker daemon is ready"
+    return 0
+  fi
+
+  log "Docker daemon is unavailable; attempting to start it"
+  local started=1
+  if command -v systemctl >/dev/null 2>&1; then
+    if sudo systemctl start docker >&2; then
+      started=0
+    fi
+  fi
+  if (( started != 0 )) && command -v service >/dev/null 2>&1; then
+    if sudo service docker start >&2; then
+      started=0
+    fi
+  fi
+  if (( started != 0 )); then
+    return 1
+  fi
+
+  log "waiting for Docker daemon readiness"
+  if docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
+    return 0
+  fi
+  return 2
+}
+
+if ensure_docker_daemon; then
+  :
+else
+  startup_status=$?
+  if (( startup_status == 2 )); then
+    fail docker-readiness "Docker daemon did not become ready"
+  fi
+  fail docker-start "unable to start the Docker daemon"
 fi
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cwc-build.XXXXXX")
