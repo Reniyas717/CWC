@@ -15,6 +15,8 @@ import {
   ExternalLink,
   Workflow,
   Scale,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { api } from '@/services/api';
@@ -154,11 +156,11 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground font-sans selection:bg-primary/10">
-      {/* Top Navbar: Clean & Free of Internal Sidebar Buttons */}
+      {/* Top Navbar: Clean & uncluttered */}
       <header className="sticky top-0 z-30 h-13 border-b border-sidebar-border bg-sidebar/95 backdrop-blur-xs flex items-center justify-between px-3 sm:px-5">
-        {/* Left Side: Brand & Current Section */}
+        {/* Left Side: Brand & Section */}
         <div className="flex items-center gap-2.5">
-          {/* Mobile Drawer Toggle (Only on small screens) */}
+          {/* Mobile Drawer Toggle (Only visible on mobile screens) */}
           <button
             type="button"
             onClick={() => setIsMobileOpen(!isMobileOpen)}
@@ -186,9 +188,9 @@ export function AppLayout() {
           </span>
         </div>
 
-        {/* Right Side: Clean Single Status Dot, Theme Toggle & Repo Link */}
+        {/* Right Side: Network Status, Theme Toggle & Repo Link */}
         <div className="flex items-center gap-2">
-          {/* Subtle Control Plane Live Indicator */}
+          {/* Status Indicator */}
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-muted-foreground bg-secondary/60 border border-border">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
             <span className="hidden sm:inline">Network</span>
@@ -214,19 +216,64 @@ export function AppLayout() {
       </header>
 
       {/* Main Layout Area */}
-      <div className="flex-1 flex w-full">
-        {/* Desktop Collapsible Sidebar */}
+      <div className="flex-1 flex w-full relative">
+        {/* Desktop Sticky Collapsible Sidebar */}
         <aside
-          className={`hidden md:flex flex-col border-r border-sidebar-border bg-sidebar transition-all duration-200 ease-in-out shrink-0 ${
+          className={`hidden md:flex flex-col border-r border-sidebar-border bg-sidebar sticky top-13 h-[calc(100vh-3.25rem)] transition-all duration-200 ease-in-out shrink-0 select-none relative ${
             isCollapsed ? 'w-14' : 'w-56'
           }`}
         >
-          {/* Nav List */}
-          <div className="flex-1 py-4 px-2 space-y-5 overflow-y-auto overflow-x-hidden">
+          {/* Floating border edge toggle button */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            className="absolute -right-3 top-3 z-30 h-6 w-6 rounded-full border border-border bg-card shadow-xs flex items-center justify-center text-muted-foreground hover:text-foreground hover:scale-110 transition-all cursor-pointer"
+            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label="Toggle sidebar width"
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronLeft className="h-3.5 w-3.5" />
+            )}
+          </button>
+
+          {/* Sidebar Top Header with Dedicated Collapse Toggle */}
+          <div className="h-10 px-2.5 border-b border-sidebar-border flex items-center justify-between shrink-0">
+            {!isCollapsed ? (
+              <div className="flex items-center justify-between w-full">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground font-mono">
+                  Navigation
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleSidebar}
+                  className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer"
+                  title="Collapse sidebar"
+                  aria-label="Collapse sidebar"
+                >
+                  <PanelLeftClose className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleSidebar}
+                className="h-7 w-7 mx-auto rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer"
+                title="Expand sidebar"
+                aria-label="Expand sidebar"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Navigation Links */}
+          <div className="flex-1 py-3 px-2 space-y-4 overflow-y-auto overflow-x-hidden no-scrollbar">
             {NAV_GROUPS.map((group, gIdx) => (
               <div key={gIdx} className="space-y-1">
                 {!isCollapsed && (
-                  <div className="px-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground font-mono">
+                  <div className="px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground font-mono">
                     {group.group}
                   </div>
                 )}
@@ -264,28 +311,28 @@ export function AppLayout() {
             ))}
           </div>
 
-          {/* Sidebar Footer — Internal Collapse Button & Version Tag */}
-          <div className="p-2 border-t border-sidebar-border">
+          {/* Sidebar Footer with Collapse Action and Version */}
+          <div className="p-2 border-t border-sidebar-border shrink-0">
             <button
               type="button"
               onClick={toggleSidebar}
               className={`flex items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer w-full ${
                 isCollapsed
-                  ? 'h-9 w-9 mx-auto justify-center'
-                  : 'h-8 px-2.5 gap-2.5 text-xs font-medium justify-between'
+                  ? 'h-8 w-8 mx-auto justify-center'
+                  : 'h-7.5 px-2 gap-2 text-xs font-medium justify-between'
               }`}
               title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-label="Toggle sidebar"
             >
               {isCollapsed ? (
-                <PanelLeft className="h-4 w-4" />
+                <PanelLeft className="h-3.5 w-3.5" />
               ) : (
                 <>
-                  <div className="flex items-center gap-2">
-                    <PanelLeftClose className="h-4 w-4 shrink-0" />
-                    <span>Collapse sidebar</span>
+                  <div className="flex items-center gap-1.5">
+                    <PanelLeftClose className="h-3.5 w-3.5 shrink-0" />
+                    <span>Collapse</span>
                   </div>
-                  <span className="text-[10px] font-mono text-muted-foreground/60 tracking-wider">
+                  <span className="text-[10px] font-mono text-muted-foreground/60">
                     v0.1.0
                   </span>
                 </>
