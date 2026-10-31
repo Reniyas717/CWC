@@ -17,6 +17,7 @@ const logger = createLogger('WorkerAgent');
 let heartbeatTimer: NodeJS.Timeout | null = null;
 let isHeartbeatRunning = false;
 let isShuttingDown = false;
+let isRegistered = false;
 let taskPoller: TaskPoller | null = null;
 let dockerEngine: DockerEngine | null = null;
 
@@ -39,6 +40,14 @@ async function bootstrap() {
   const controlPlaneClient = new ControlPlaneClient();
   const gitRunner = new GitRunner();
   dockerEngine = new DockerEngine();
+
+  // Reconcile and clean up any orphan containers left by previous ungraceful worker shutdowns
+  const orphans = await dockerEngine.reconcileExistingContainers();
+  if (orphans.length > 0) {
+    logger.info(`Cleaned up ${orphans.length} orphan container(s) from previous session`, {
+      cleanedDeployments: orphans,
+    });
+  }
 
   const deploymentRunner = new DeploymentRunner(
     gitRunner,
@@ -84,18 +93,29 @@ async function bootstrap() {
     version: '0.1.0',
   };
 
-  const regResponse = await controlPlaneClient.register(registrationPayload);
-  if (regResponse.ok) {
-    logger.info('Worker successfully registered with Control Plane');
-  } else if (regResponse.isNotImplemented) {
-    logger.warn(
-      `Worker registration endpoint returned HTTP ${regResponse.statusCode}. Control-plane registration handler is pending implementation by Teammate 2.`
-    );
-  } else {
-    logger.warn(
-      `Worker registration attempt unsuccessful: ${regResponse.error || `HTTP ${regResponse.statusCode}`}. Continuing with periodic heartbeat telemetry.`
-    );
-  }
+  const attemptRegistration = async (): Promise<boolean> => {
+    try {
+      const regResponse = await controlPlaneClient.register(registrationPayload);
+      if (regResponse.ok) {
+        isRegistered = true;
+        logger.info('Worker successfully registered with Control Plane');
+        return true;
+      } else if (regResponse.isNotImplemented) {
+        logger.warn(
+          `Worker registration endpoint returned HTTP ${regResponse.statusCode}. Control-plane registration handler is pending implementation by Teammate 2.`
+        );
+      } else {
+        logger.warn(
+          `Worker registration attempt unsuccessful: ${regResponse.error || `HTTP ${regResponse.statusCode}`}. Retrying in subsequent heartbeat cycles.`
+        );
+      }
+    } catch {
+      // Ignore network errors during registration attempt
+    }
+    return false;
+  };
+
+  await attemptRegistration();
 
   // 4. Start task polling loop
   taskPoller.start();
@@ -108,6 +128,11 @@ async function bootstrap() {
 
     isHeartbeatRunning = true;
     try {
+      // If registration was not acknowledged yet, attempt re-registration
+      if (!isRegistered) {
+        await attemptRegistration();
+      }
+
       const resources = metricsService.getResources();
       const heartbeatPayload: WorkerHeartbeat = {
         workerId: workerConfig.WORKER_ID,

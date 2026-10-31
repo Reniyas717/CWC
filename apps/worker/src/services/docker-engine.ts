@@ -15,6 +15,7 @@ export interface DockerBuildOptions {
   workingDir: string;
   dockerfilePath?: string;
   buildContext?: string;
+  signal?: AbortSignal;
 }
 
 export interface DockerBuildResult {
@@ -30,6 +31,7 @@ export interface DockerRunOptions {
   cpuLimitCores?: number;
   env?: Array<{ key: string; value: string }>;
   healthCheckPath?: string;
+  signal?: AbortSignal;
 }
 
 export interface DockerResourceCaps {
@@ -129,6 +131,7 @@ export class DockerEngine {
       const { stdout, stderr } = await execFileAsync('docker', buildArgs, {
         cwd: workingDir,
         maxBuffer: 10 * 1024 * 1024,
+        signal: options.signal,
       });
 
       if (stdout) {
@@ -221,7 +224,7 @@ export class DockerEngine {
 
     let containerId: string;
     try {
-      const { stdout } = await execFileAsync('docker', runArgs);
+      const { stdout } = await execFileAsync('docker', runArgs, { signal: options.signal });
       containerId = stdout.trim();
       addLog(
         `Container ${containerName} started with ID ${containerId.substring(0, 12)}`,
@@ -481,6 +484,36 @@ export class DockerEngine {
 
     this.activeContainers.clear();
     logger.info('All active containers stopped and removed cleanly');
+  }
+
+  /**
+   * Reconciles orphan containers left behind by previous crashed worker instances.
+   */
+  public async reconcileExistingContainers(): Promise<string[]> {
+    try {
+      const { stdout } = await execFileAsync('docker', [
+        'ps',
+        '-a',
+        '--filter',
+        'label=cwc.deploymentId',
+        '--format',
+        '{{.ID}} {{.Names}} {{.Label "cwc.deploymentId"}}',
+      ]);
+
+      const cleaned: string[] = [];
+      const lines = stdout.trim().split('\n').filter(Boolean);
+      for (const line of lines) {
+        const [id, name, deploymentId] = line.trim().split(/\s+/);
+        if (id && deploymentId) {
+          logger.info(`Reconciling leftover container from previous session: ${name} (${id})`);
+          await this.forceRemoveContainer(id);
+          cleaned.push(deploymentId);
+        }
+      }
+      return cleaned;
+    } catch {
+      return [];
+    }
   }
 
   /**

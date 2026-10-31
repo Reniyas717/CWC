@@ -19,6 +19,7 @@ export class DeploymentRunner {
   private controlPlaneClient: ControlPlaneClient;
   private metricsService: MetricsService;
   private activeDeployments: Set<string> = new Set();
+  private inProgressControllers: Map<string, AbortController> = new Map();
 
   constructor(
     gitRunner: GitRunner,
@@ -54,7 +55,9 @@ export class DeploymentRunner {
       };
     }
 
+    const abortController = new AbortController();
     this.activeDeployments.add(deploymentId);
+    this.inProgressControllers.set(deploymentId, abortController);
     this.metricsService.registerWorkload(deploymentId);
 
     const allLogs: DeploymentLogEntry[] = [];
@@ -84,12 +87,17 @@ export class DeploymentRunner {
 
     try {
       // Step 1: Git checkout
-      addLog(`Cloning repository from ${task.git.repositoryUrl} (branch: ${task.git.branch || 'main'})...`, 'system', 'info');
+      addLog(
+        `Cloning repository from ${task.git.repositoryUrl} (branch: ${task.git.branch || 'main'})...`,
+        'system',
+        'info'
+      );
       const cloneResult = await this.gitRunner.cloneRepository({
         deploymentId,
         repositoryUrl: task.git.repositoryUrl,
         branch: task.git.branch,
         commitHash: task.git.commitHash,
+        signal: abortController.signal,
       });
 
       workingDir = cloneResult.workingDir;
@@ -97,15 +105,21 @@ export class DeploymentRunner {
       addLog(`Repository checked out at commit ${commitSha}`, 'system', 'info');
 
       // Step 2: Docker build
-      const buildContext = task.buildContext || (task.git.rootDirectory !== '/' ? task.git.rootDirectory : '.');
+      const buildContext =
+        task.buildContext || (task.git.rootDirectory !== '/' ? task.git.rootDirectory : '.');
       const dockerfilePath = task.dockerfilePath || 'Dockerfile';
 
-      addLog(`Building Docker image using ${dockerfilePath} (context: ${buildContext})...`, 'system', 'info');
+      addLog(
+        `Building Docker image using ${dockerfilePath} (context: ${buildContext})...`,
+        'system',
+        'info'
+      );
       const buildResult = await this.dockerEngine.buildImage({
         deploymentId,
         workingDir,
         dockerfilePath,
         buildContext,
+        signal: abortController.signal,
       });
 
       imageTag = buildResult.imageTag;
@@ -113,7 +127,11 @@ export class DeploymentRunner {
       addLog(`Docker image ${imageTag} build complete`, 'system', 'info');
 
       // Step 3: Run container with enforced caps & dynamic ephemeral port
-      addLog(`Starting container with memory: ${task.resourceLimits.memoryLimitMb}MB, cpus: ${task.resourceLimits.cpuLimitCores}...`, 'system', 'info');
+      addLog(
+        `Starting container with memory: ${task.resourceLimits.memoryLimitMb}MB, cpus: ${task.resourceLimits.cpuLimitCores}...`,
+        'system',
+        'info'
+      );
       const runResult = await this.dockerEngine.runContainer({
         deploymentId,
         imageTag,
@@ -122,6 +140,7 @@ export class DeploymentRunner {
         cpuLimitCores: task.resourceLimits.cpuLimitCores,
         env: task.env,
         healthCheckPath: task.healthCheckPath,
+        signal: abortController.signal,
       });
 
       allLogs.push(...runResult.logs);
@@ -152,19 +171,28 @@ export class DeploymentRunner {
       await this.controlPlaneClient.reportResult(resultPayload);
       await this.controlPlaneClient.sendLogs({ deploymentId, logs: allLogs });
 
-      logger.info(`Deployment ${deploymentId} completed successfully on port ${runResult.assignedPort}`);
+      logger.info(
+        `Deployment ${deploymentId} completed successfully on port ${runResult.assignedPort}`
+      );
       return resultPayload;
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      logger.error(`Deployment ${deploymentId} failed`, err);
-      addLog(`Deployment failed: ${errorMessage}`, 'stderr', 'error');
+      const isAbort =
+        (err instanceof Error && err.name === 'AbortError') || abortController.signal.aborted;
+      const errorMessage = isAbort
+        ? 'Deployment aborted by stop/cancel request'
+        : err instanceof Error
+          ? err.message
+          : String(err);
+
+      logger.error(`Deployment ${deploymentId} failed or aborted`, err);
+      addLog(`Deployment status update: ${errorMessage}`, 'stderr', 'error');
 
       // Clean up directory if still present
       if (workingDir) {
         await this.gitRunner.cleanup(workingDir);
       }
 
-      // Clean up any failed container
+      // Clean up any partially created or running container
       await this.dockerEngine.forceRemoveContainer(`cwc-${deploymentId.toLowerCase()}`);
       this.dockerEngine.unregisterActiveContainer(deploymentId);
       this.metricsService.unregisterWorkload(deploymentId);
@@ -172,7 +200,7 @@ export class DeploymentRunner {
       const failedResult: DeploymentResultPayload = {
         deploymentId,
         workerId: workerConfig.WORKER_ID,
-        state: 'failed',
+        state: isAbort ? 'stopped' : 'failed',
         gitCommitHash: commitSha ?? undefined,
         imageTag: imageTag ?? undefined,
         errorMessage,
@@ -187,19 +215,29 @@ export class DeploymentRunner {
 
       return failedResult;
     } finally {
+      this.inProgressControllers.delete(deploymentId);
       this.activeDeployments.delete(deploymentId);
     }
   }
 
   /**
-   * Stops an active deployment and cleans up its container.
+   * Stops an active deployment, aborts in-progress build/run, and cleans up its container.
    */
   public async stopDeployment(deploymentId: string): Promise<void> {
     logger.info(`Stopping deployment ${deploymentId}...`);
+
+    // Abort in-progress Git clone or Docker build if currently executing
+    const controller = this.inProgressControllers.get(deploymentId);
+    if (controller) {
+      logger.info(`Aborting in-progress execution for deployment ${deploymentId}`);
+      controller.abort();
+    }
+
     await this.dockerEngine.forceRemoveContainer(`cwc-${deploymentId.toLowerCase()}`);
     this.dockerEngine.unregisterActiveContainer(deploymentId);
     this.metricsService.unregisterWorkload(deploymentId);
     this.activeDeployments.delete(deploymentId);
+    this.inProgressControllers.delete(deploymentId);
 
     try {
       await this.controlPlaneClient.reportResult({

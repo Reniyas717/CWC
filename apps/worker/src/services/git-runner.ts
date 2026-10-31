@@ -13,6 +13,7 @@ export interface GitCloneOptions {
   repositoryUrl: string;
   branch?: string;
   commitHash?: string;
+  signal?: AbortSignal;
 }
 
 export interface GitCloneResult {
@@ -74,7 +75,7 @@ export class GitRunner {
    * Clones a public repository into an isolated temporary workspace directory.
    */
   public async cloneRepository(options: GitCloneOptions): Promise<GitCloneResult> {
-    const { deploymentId, repositoryUrl, branch = 'main', commitHash } = options;
+    const { deploymentId, repositoryUrl, branch = 'main', commitHash, signal } = options;
 
     if (!this.validateDeploymentId(deploymentId)) {
       throw new Error(`Invalid deployment ID: "${deploymentId}". Must be alphanumeric with dashes/underscores.`);
@@ -110,24 +111,23 @@ export class GitRunner {
     try {
       if (commitHash) {
         // Clone repository and checkout specific commit
-        await execFileAsync('git', ['clone', '--no-checkout', repositoryUrl, workingDir]);
-        await execFileAsync('git', ['checkout', commitHash], { cwd: workingDir });
+        await execFileAsync('git', ['clone', '--no-checkout', repositoryUrl, workingDir], {
+          signal,
+        });
+        await execFileAsync('git', ['checkout', commitHash], { cwd: workingDir, signal });
       } else {
         // Shallow clone target branch
-        await execFileAsync('git', [
-          'clone',
-          '--depth',
-          '1',
-          '-b',
-          branch,
-          repositoryUrl,
-          workingDir,
-        ]);
+        await execFileAsync(
+          'git',
+          ['clone', '--depth', '1', '-b', branch, repositoryUrl, workingDir],
+          { signal }
+        );
       }
 
       // Resolve HEAD commit SHA
       const { stdout: commitShaRaw } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
         cwd: workingDir,
+        signal,
       });
       const commitSha = commitShaRaw.trim();
 
