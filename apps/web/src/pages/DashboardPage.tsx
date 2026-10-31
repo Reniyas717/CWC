@@ -20,6 +20,7 @@ import {
   Server,
   Activity,
   CheckCircle2,
+  Scale,
 } from 'lucide-react';
 import { Deployment } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown } from '@/services/api';
@@ -123,9 +124,18 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
+          <NavLink to="/equalizer">
+            <Button
+              variant="outline"
+              className="h-9 px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <Scale className="h-3.5 w-3.5" />
+              <span>Load Equalizer</span>
+            </Button>
+          </NavLink>
           <Button
             onClick={() => setIsDeployModalOpen(true)}
-            className="h-9 px-3.5 text-xs font-semibold shadow-2xs flex items-center gap-1.5"
+            className="h-9 px-3.5 text-xs font-semibold shadow-2xs flex items-center gap-1.5 cursor-pointer"
           >
             <Plus className="h-4 w-4" />
             <span>Deploy Application</span>
@@ -199,64 +209,65 @@ export function DashboardPage() {
                       key={dep.id}
                       className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs"
                     >
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono text-xs font-semibold text-foreground">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold text-foreground truncate">
                             {dep.id}
                           </span>
-                          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
-                            {dep.applicationId}
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                            {dep.gitBranch}
                           </span>
                           {dep.state === 'running' ? (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            <span className="inline-flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                               Running
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                              {dep.state}
-                            </span>
+                            <span className="text-[10px] text-amber-500 font-medium">{dep.state}</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
-                          <span>Worker: {dep.workerId || 'pending'}</span>
-                          {dep.assignedPort && <span>• Port :{dep.assignedPort}</span>}
-                          {dep.publicUrl && (
-                            <a
-                              href={dep.publicUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-foreground hover:underline inline-flex items-center gap-1"
-                            >
-                              <ExternalLink className="h-2.5 w-2.5" />
-                              Tunnel
-                            </a>
-                          )}
-                        </div>
+                        <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                          {dep.applicationId} • Node:{' '}
+                          <span className="font-mono text-foreground">{dep.workerId || 'pending'}</span>
+                        </p>
                       </div>
 
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setSelectedLogDep(dep)}
-                        className="h-7 px-2.5 text-xs flex items-center gap-1 shrink-0 self-end sm:self-center"
-                      >
-                        <Terminal className="h-3 w-3" />
-                        <span>Logs</span>
-                      </Button>
+                      <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                        {dep.publicUrl && (
+                          <a
+                            href={dep.publicUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[11px] text-primary hover:underline flex items-center gap-1 font-mono"
+                          >
+                            <span>Live Ingress</span>
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedLogDep(dep)}
+                          className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground font-mono"
+                        >
+                          <Terminal className="h-3 w-3 mr-1" />
+                          Logs
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="pt-3 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground font-mono">
-                <span>Total Workloads: {deployments.length}</span>
-                <span>Active Ingress: {runningCount} tunnels</span>
+
+              <div className="pt-3 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>Task Dispatch: HTTP Polling (2-5s)</span>
+                <span className="font-mono text-[10px]">Docker Port: Ephemeral</span>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Worker Fleet Preview (5 Cols) */}
+        {/* Distributed Compute Fleet & Real-Time Scores (5 Cols) */}
         <div className="lg:col-span-5 space-y-3">
           <Card className="h-full flex flex-col justify-between">
             <CardHeader className="p-5 pb-3">
@@ -264,17 +275,17 @@ export function DashboardPage() {
                 <div>
                   <CardTitle className="text-sm font-semibold flex items-center gap-2">
                     <Server className="h-4 w-4 text-foreground" />
-                    <span>Connected Peer Nodes</span>
+                    <span>Worker Compute Fleet</span>
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Workstations participating in the distributed compute fabric.
+                    Live telemetry & S(W) load scores.
                   </CardDescription>
                 </div>
                 <NavLink
                   to="/workers"
                   className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors font-medium"
                 >
-                  <span>Fleet</span>
+                  <span>View all</span>
                   <ArrowRight className="h-3 w-3" />
                 </NavLink>
               </div>
@@ -282,36 +293,43 @@ export function DashboardPage() {
             <CardContent className="p-5 pt-0 flex-1 flex flex-col justify-between">
               {workers.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
-                  No workers registered. Start an agent with <code className="bg-secondary px-1 py-0.5 rounded">pnpm dev:worker</code>
+                  No active worker nodes registered.
                 </div>
               ) : (
-                <div className="divide-y divide-border">
+                <div className="space-y-2.5">
                   {workers.slice(0, 3).map((w) => {
                     const score = getScoreForWorker(w.id);
                     return (
-                      <div key={w.id} className="py-3 space-y-1.5 text-xs">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-foreground flex items-center gap-1.5">
-                            <span
-                              className={`h-2 w-2 rounded-full ${
-                                w.state !== 'offline' ? 'bg-emerald-500' : 'bg-destructive'
-                              }`}
-                            />
-                            {w.name}
-                          </span>
-                          <span className="font-mono text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.2 rounded">
-                            {w.ipAddress}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
-                          <span>
-                            CPU: {w.resources?.cpuUsagePercent ?? 0}% • RAM:{' '}
-                            {((w.resources?.usedMemoryMb ?? 0) / 1024).toFixed(1)} GB
-                          </span>
-                          {score && (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                              S(W): {score.score.toFixed(3)}
+                      <div
+                        key={w.id}
+                        className="p-3 bg-secondary/30 rounded-lg border border-border flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-foreground truncate">{w.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                              {w.ipAddress}
                             </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {w.resources?.cpuCount} Cores •{' '}
+                            {((w.resources?.totalMemoryMb ?? 0) / 1024).toFixed(0)} GB RAM •{' '}
+                            {w.resources?.activeContainers ?? 0} Containers
+                          </p>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          {score ? (
+                            <div>
+                              <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                                S(W)
+                              </span>
+                              <span className="font-mono text-xs font-bold text-foreground">
+                                {score.score.toFixed(3)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
                           )}
                         </div>
                       </div>

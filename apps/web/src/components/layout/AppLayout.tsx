@@ -14,6 +14,7 @@ import {
   X,
   ExternalLink,
   Workflow,
+  Scale,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { api } from '@/services/api';
@@ -36,6 +37,7 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
       { label: 'Applications', path: '/apps', icon: Layers },
       { label: 'Worker Nodes', path: '/workers', icon: Cpu, badgeKey: 'workers' },
       { label: 'Deployments', path: '/deployments', icon: Workflow, badgeKey: 'deployments' },
+      { label: 'Cluster Equalizer', path: '/equalizer', icon: Scale },
       { label: 'Cluster Logs', path: '/logs', icon: Terminal, badgeKey: 'logs' },
     ],
   },
@@ -94,6 +96,8 @@ export function AppLayout() {
         return 'Worker Nodes';
       case '/deployments':
         return 'Deployments';
+      case '/equalizer':
+        return 'Cluster Resource Equalizer';
       case '/logs':
         return 'Cluster Logs';
       case '/settings':

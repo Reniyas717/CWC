@@ -13,7 +13,11 @@ import { db } from '../db/index.js';
 import { workerNodes, deployments, applications } from '../db/schema.js';
 import { recordWorkerHeartbeatInCache, removeWorkerFromCache } from '../cache/redis.js';
 import { sweepWorkerHealth } from '../services/sweeper.js';
-import { getWorkerLoadScores, schedulePendingDeployments } from '../services/scheduler.js';
+import {
+  getWorkerLoadScores,
+  schedulePendingDeployments,
+  rebalanceClusterWorkloads,
+} from '../services/scheduler.js';
 
 export const workersRouter: Router = Router();
 
@@ -156,6 +160,37 @@ workersRouter.post('/sweep', optionalAdmin, async (_req: Request, res: Response)
       error: {
         code: 'SWEEP_FAILED',
         message: 'Failed to execute worker health sweep',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/workers/rebalance
+ * Capacity-weighted cluster load equalizer.
+ * Proportional to worker hardware: a 16 GB node and a 2 GB node are balanced when
+ * their allocation ratios (allocated / total) are approximately equal.
+ * Query / Body parameters:
+ *   dryRun: boolean (if true, calculates the migration plan without executing)
+ */
+workersRouter.post('/rebalance', optionalAdmin, async (req: Request, res: Response) => {
+  try {
+    const dryRun = req.body?.dryRun === true || req.query?.dryRun === 'true';
+    const result = await rebalanceClusterWorkloads({ dryRun });
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: dryRun
+        ? 'Rebalance plan computed successfully'
+        : 'Cluster load equalized successfully',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'REBALANCE_FAILED',
+        message: 'Failed to equalize cluster workloads',
         details: error instanceof Error ? error.message : String(error),
       },
     });
@@ -432,7 +467,7 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
         success: false,
         error: {
           code: 'WORKER_NOT_REGISTERED',
-          message: `Worker node '${id}' is not registered. Please register first.`,
+          message: `Worker node '${id}' not registered. Please register first.`,
         },
       });
       return;

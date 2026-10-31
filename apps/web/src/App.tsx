@@ -5,6 +5,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { ApplicationsPage } from './pages/ApplicationsPage';
 import { WorkersPage } from './pages/WorkersPage';
 import { DeploymentsPage } from './pages/DeploymentsPage';
+import { EqualizerPage } from './pages/EqualizerPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 
@@ -27,6 +28,7 @@ export function App() {
             <Route path="apps" element={<ApplicationsPage />} />
             <Route path="workers" element={<WorkersPage />} />
             <Route path="deployments" element={<DeploymentsPage />} />
+            <Route path="equalizer" element={<EqualizerPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

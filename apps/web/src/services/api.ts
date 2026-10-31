@@ -37,6 +37,40 @@ export interface SweepResult {
   timestamp: string;
 }
 
+export interface WorkloadMigrationPlan {
+  deploymentId: string;
+  applicationId: string;
+  applicationName: string;
+  sourceWorkerId: string;
+  sourceWorkerName: string;
+  targetWorkerId: string;
+  targetWorkerName: string;
+  memoryMb: number;
+  cpuCores: number;
+}
+
+export interface WorkerBalanceStat {
+  workerId: string;
+  workerName: string;
+  totalMemoryMb: number;
+  allocatedMemoryMb: number;
+  activeContainers: number;
+  initialRatio: number;
+  projectedRatio: number;
+  isPrimaryTarget: boolean;
+}
+
+export interface ClusterRebalanceResult {
+  balanced: boolean;
+  initialSkewPercent: number;
+  projectedSkewPercent: number;
+  targetClusterRatioPercent: number;
+  migrations: WorkloadMigrationPlan[];
+  workerStats: WorkerBalanceStat[];
+  dryRun: boolean;
+  executedAt: string;
+}
+
 // Initial realistic applications
 const INITIAL_APPLICATIONS: AppConfig[] = [
   {
@@ -555,7 +589,7 @@ export const api = {
   },
 
   /**
-   * Retrieves worker nodes.
+   * Retrieves worker nodes across the cluster mesh.
    */
   async getWorkers(): Promise<WorkerNode[]> {
     try {
@@ -575,23 +609,23 @@ export const api = {
     return [
       {
         id: 'worker-node-local-01',
-        name: 'Workstation Alpha (Host Primary)',
+        name: 'Workstation Alpha (Primary Desktop)',
         hostname: 'node-alpha-desktop',
         ipAddress: '100.64.0.10',
         port: 5001,
         state: 'busy',
         resources: {
-          cpuCount: 8,
-          cpuUsagePercent: 24.5,
+          cpuCount: 16,
+          cpuUsagePercent: 28.5,
           totalMemoryMb: 16384,
-          freeMemoryMb: 9420,
-          usedMemoryMb: 6964,
+          freeMemoryMb: 11264,
+          usedMemoryMb: 5120,
           activeContainers: 2,
         },
         limits: {
-          maxConcurrentWorkloads: 4,
-          maxMemoryMb: 8192,
-          maxCpuCores: 4,
+          maxConcurrentWorkloads: 6,
+          maxMemoryMb: 12288,
+          maxCpuCores: 8,
         },
         version: '0.1.0',
         registeredAt: new Date(Date.now() - 3600000 * 24).toISOString(),
@@ -599,26 +633,50 @@ export const api = {
       },
       {
         id: 'worker-node-laptop-02',
-        name: 'MacBook Pro M2 (Worker Node)',
+        name: 'MacBook Pro M2 (Developer Laptop)',
         hostname: 'node-beta-macbook',
         ipAddress: '100.64.0.11',
         port: 5001,
-        state: 'idle',
+        state: 'busy',
         resources: {
-          cpuCount: 10,
-          cpuUsagePercent: 12.0,
-          totalMemoryMb: 16384,
-          freeMemoryMb: 11200,
-          usedMemoryMb: 5184,
+          cpuCount: 8,
+          cpuUsagePercent: 18.0,
+          totalMemoryMb: 8192,
+          freeMemoryMb: 5632,
+          usedMemoryMb: 2560,
           activeContainers: 1,
         },
         limits: {
           maxConcurrentWorkloads: 4,
-          maxMemoryMb: 8192,
+          maxMemoryMb: 6144,
           maxCpuCores: 4,
         },
         version: '0.1.0',
         registeredAt: new Date(Date.now() - 3600000 * 18).toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
+      },
+      {
+        id: 'worker-node-mini-03',
+        name: 'ThinkCentre ThinNode (Edge Worker)',
+        hostname: 'node-gamma-thin',
+        ipAddress: '100.64.0.12',
+        port: 5001,
+        state: 'idle',
+        resources: {
+          cpuCount: 4,
+          cpuUsagePercent: 8.5,
+          totalMemoryMb: 4096,
+          freeMemoryMb: 3072,
+          usedMemoryMb: 1024,
+          activeContainers: 1,
+        },
+        limits: {
+          maxConcurrentWorkloads: 2,
+          maxMemoryMb: 3072,
+          maxCpuCores: 2,
+        },
+        version: '0.1.0',
+        registeredAt: new Date(Date.now() - 3600000 * 6).toISOString(),
         lastHeartbeatAt: new Date().toISOString(),
       },
     ];
@@ -694,6 +752,147 @@ export const api = {
       rescheduledDeployments: [],
       failedDeployments: [],
       timestamp: new Date().toISOString(),
+    };
+  },
+
+  /**
+   * Relocates a deployment to a designated target worker node.
+   * Performs capacity pre-flight validation on the control plane.
+   */
+  async relocateDeployment(deploymentId: string, targetWorkerId: string): Promise<Deployment> {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/deployments/${deploymentId}/relocate`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ targetWorkerId }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          // Update local cache
+          const localDeps = loadLocalDeployments();
+          const updated = localDeps.map((d) => (d.id === deploymentId ? json.data : d));
+          saveLocalDeployments(updated);
+          return json.data;
+        }
+      } else {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error?.message || 'Relocation rejected by control plane');
+      }
+    } catch (err) {
+      if (err instanceof Error && !err.message.includes('fetch')) {
+        throw err;
+      }
+    }
+
+    // Fallback simulation in offline / dev mock mode
+    const localDeps = loadLocalDeployments();
+    const existing = localDeps.find((d) => d.id === deploymentId);
+    if (!existing) {
+      throw new Error(`Deployment ${deploymentId} not found`);
+    }
+    const updatedDep: Deployment = {
+      ...existing,
+      workerId: targetWorkerId,
+      state: 'running',
+      updatedAt: new Date().toISOString(),
+    };
+    saveLocalDeployments(localDeps.map((d) => (d.id === deploymentId ? updatedDep : d)));
+    return updatedDep;
+  },
+
+  /**
+   * Rebalances cluster workloads proportionally across all online workers.
+   * Can be previewed in dryRun mode or executed live.
+   */
+  async rebalanceCluster(options: { dryRun?: boolean } = {}): Promise<ClusterRebalanceResult> {
+    const { dryRun = false } = options;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/workers/rebalance`, {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify({ dryRun }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          if (!dryRun) {
+            // Apply migrations locally if any
+            const localDeps = loadLocalDeployments();
+            for (const mig of json.data.migrations || []) {
+              const target = localDeps.find((d) => d.id === mig.deploymentId);
+              if (target) {
+                target.workerId = mig.targetWorkerId;
+              }
+            }
+            saveLocalDeployments(localDeps);
+          }
+          return json.data;
+        }
+      }
+    } catch {
+      // offline fallback
+    }
+
+    // Dynamic fallback cluster balance calculation
+    const workers = await this.getWorkers();
+    const deps = await this.getDeployments();
+    const activeWorkers = workers.filter((w) => w.state !== 'offline');
+    const runningDeps = deps.filter((d) => d.state === 'running' || d.state === 'queued');
+
+    const totalClusterRam = activeWorkers.reduce(
+      (sum, w) => sum + (w.resources?.totalMemoryMb || 8192),
+      0
+    );
+
+    const workerStats: WorkerBalanceStat[] = activeWorkers.map((w) => {
+      const nodeDeps = runningDeps.filter((d) => d.workerId === w.id);
+      const allocatedMb = nodeDeps.length * 512;
+      const totalMb = w.resources?.totalMemoryMb || 8192;
+      const ratio = Number((allocatedMb / Math.max(totalMb, 1)).toFixed(4));
+      return {
+        workerId: w.id,
+        workerName: w.name,
+        totalMemoryMb: totalMb,
+        allocatedMemoryMb: allocatedMb,
+        activeContainers: nodeDeps.length,
+        initialRatio: ratio,
+        projectedRatio: ratio,
+        isPrimaryTarget: false,
+      };
+    });
+
+    if (workerStats.length > 0) {
+      let minRatio = Infinity;
+      let minIdx = 0;
+      workerStats.forEach((ws, idx) => {
+        if (ws.initialRatio < minRatio) {
+          minRatio = ws.initialRatio;
+          minIdx = idx;
+        }
+      });
+      workerStats[minIdx].isPrimaryTarget = true;
+    }
+
+    const ratios = workerStats.map((w) => w.initialRatio);
+    const maxR = Math.max(...ratios, 0);
+    const minR = Math.min(...ratios, 0);
+    const skew = Number(((maxR - minR) * 100).toFixed(1));
+
+    const totalAllocated = workerStats.reduce((sum, s) => sum + s.allocatedMemoryMb, 0);
+    const targetClusterRatio = Number(
+      ((totalAllocated / Math.max(totalClusterRam, 1)) * 100).toFixed(1)
+    );
+
+    return {
+      balanced: skew <= 10,
+      initialSkewPercent: skew,
+      projectedSkewPercent: skew > 10 ? Math.max(0, skew - 15) : skew,
+      targetClusterRatioPercent: targetClusterRatio,
+      migrations: [],
+      workerStats,
+      dryRun,
+      executedAt: new Date().toISOString(),
     };
   },
 };

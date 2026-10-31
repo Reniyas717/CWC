@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { NavLink } from 'react-router-dom';
 import {
   Cpu,
   HardDrive,
@@ -13,6 +14,8 @@ import {
   CheckCircle2,
   RefreshCw,
   SlidersHorizontal,
+  Scale,
+  ArrowRight,
 } from 'lucide-react';
 import { WorkerNode } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown, SweepResult } from '@/services/api';
@@ -106,7 +109,7 @@ export function WorkersPage() {
 
   return (
     <div className="space-y-8">
-      {/* Header with Sweeper Action */}
+      {/* Header with Sweeper & Equalizer Action */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h1
@@ -120,14 +123,23 @@ export function WorkersPage() {
           </p>
         </div>
 
-        {/* Health Sweeper Action */}
+        {/* Equalizer & Health Sweeper Actions */}
         <div className="flex items-center gap-2 shrink-0">
+          <NavLink to="/equalizer">
+            <Button
+              size="sm"
+              className="h-8.5 text-xs flex items-center gap-1.5 font-semibold cursor-pointer"
+            >
+              <Scale className="h-3.5 w-3.5" />
+              <span>Cluster Equalizer</span>
+            </Button>
+          </NavLink>
           <Button
             variant="outline"
             size="sm"
             onClick={() => sweepMutation.mutate()}
             disabled={sweepMutation.isPending}
-            className="h-8.5 text-xs flex items-center gap-1.5"
+            className="h-8.5 text-xs flex items-center gap-1.5 cursor-pointer"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${sweepMutation.isPending ? 'animate-spin' : ''}`} />
             <span>{sweepMutation.isPending ? 'Sweeping...' : 'Run Cluster Sweep'}</span>
@@ -184,9 +196,13 @@ export function WorkersPage() {
               <SlidersHorizontal className="h-3.5 w-3.5 text-muted-foreground" />
               Scheduler Placement Formula S(W)
             </CardTitle>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-              Phase 6 Target Architecture
-            </span>
+            <NavLink
+              to="/equalizer"
+              className="text-xs text-primary font-medium hover:underline flex items-center gap-1"
+            >
+              <span>Launch Resource Equalizer</span>
+              <ArrowRight className="h-3 w-3" />
+            </NavLink>
           </div>
         </CardHeader>
         <CardContent className="px-5 pb-5 text-xs text-muted-foreground space-y-2">
@@ -200,99 +216,91 @@ export function WorkersPage() {
         </CardContent>
       </Card>
 
-      {/* Worker Node Cards */}
+      {/* Worker List */}
       {isLoading ? (
         <div className="space-y-3">
-          {[1, 2].map((i) => (
+          {[1, 2, 3].map((i) => (
             <Card key={i} className="p-5">
-              <div className="flex items-center justify-between mb-4">
-                <Skeleton className="h-5 w-56" />
-                <Skeleton className="h-5 w-16" />
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Skeleton className="h-10" />
-                <Skeleton className="h-10" />
-                <Skeleton className="h-10" />
-                <Skeleton className="h-10" />
+              <Skeleton className="h-5 w-48 mb-3" />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map((j) => (
+                  <Skeleton key={j} className="h-10 w-full" />
+                ))}
               </div>
             </Card>
           ))}
         </div>
       ) : workers.length === 0 ? (
-        <Card className="border border-dashed border-border p-10 text-center">
-          <div className="max-w-sm mx-auto space-y-3">
-            <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mx-auto">
-              <Server className="h-5 w-5 text-muted-foreground" />
-            </div>
-            <p className="text-sm font-medium text-foreground">No Workers Registered</p>
-            <p className="text-xs text-muted-foreground">
-              Run{' '}
-              <code className="font-mono bg-secondary px-1.5 py-0.5 rounded text-foreground">
-                pnpm dev:worker
-              </code>{' '}
-              on a workstation to link it across the Tailscale mesh.
-            </p>
+        <Card className="p-12 text-center">
+          <Server className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+          <h3 className="text-base font-semibold text-foreground mb-1">No Worker Nodes Found</h3>
+          <p className="text-sm text-muted-foreground max-w-md mx-auto mb-4">
+            Start a worker node on your workstation using `pnpm dev:worker` to register it with the control plane.
+          </p>
+          <div className="inline-block p-3 bg-secondary rounded-md font-mono text-xs text-left">
+            $ pnpm --filter @cloud-without-clouds/worker dev
           </div>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {workers.map((worker) => {
-            const memUsedPct = worker.resources
-              ? Math.round(
-                  (worker.resources.usedMemoryMb / Math.max(worker.resources.totalMemoryMb, 1)) * 100
-                )
-              : 0;
-            const lastSeen = new Date(worker.lastHeartbeatAt);
-            const secondsAgo = Math.max(0, Math.round((Date.now() - lastSeen.getTime()) / 1000));
-            const isFresh = secondsAgo < 15;
-            const isWarning = secondsAgo >= 15 && secondsAgo < 30;
-
             const scoreInfo = getScoreForWorker(worker.id);
+            const memUsedPct = worker.resources
+              ? (worker.resources.usedMemoryMb / Math.max(worker.resources.totalMemoryMb, 1)) * 100
+              : 0;
+            const lastHeartbeat = new Date(worker.lastHeartbeatAt).getTime();
+            const secondsAgo = Math.floor((Date.now() - lastHeartbeat) / 1000);
+            const isFresh = secondsAgo < 15 && worker.state !== 'offline';
+            const isWarning = secondsAgo >= 15 && secondsAgo < 30 && worker.state !== 'offline';
 
             return (
-              <Card key={worker.id} className="overflow-hidden hover:border-foreground/20 transition-all">
-                <CardHeader className="p-5 pb-3">
-                  <div className="flex items-start justify-between gap-3 flex-wrap">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <CardTitle className="text-sm font-bold text-foreground">
-                          {worker.name}
-                        </CardTitle>
-                        <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                          {worker.id}
-                        </span>
-                        {scoreInfo && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-semibold">
-                            <ShieldCheck className="h-3 w-3" />
-                            Load Score S(W): {scoreInfo.score.toFixed(4)}
-                          </span>
-                        )}
+              <Card key={worker.id} className="transition-all hover:border-foreground/20">
+                <CardContent className="p-5 space-y-4">
+                  {/* Top Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="h-8 w-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
+                        <Server className="h-4 w-4 text-muted-foreground" />
                       </div>
-                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground font-mono flex-wrap">
-                        <span>{worker.hostname}</span>
-                        <span>•</span>
-                        <span>
-                          {worker.ipAddress}:{worker.port}
-                        </span>
-                        <span>•</span>
-                        <span>agent v{worker.version}</span>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-foreground text-sm">{worker.name}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                            {worker.hostname}
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                            {worker.ipAddress}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">{worker.id}</p>
                       </div>
                     </div>
-                    <WorkerStatusBadge state={worker.state} />
-                  </div>
-                </CardHeader>
 
-                <CardContent className="px-5 pb-5 space-y-4">
-                  {/* Hardware Telemetry Grid */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-4">
+                    <div className="flex items-center gap-2 self-start sm:self-auto">
+                      {scoreInfo && (
+                        <div className="text-right mr-2 hidden sm:block">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                            Placement S(W)
+                          </span>
+                          <span className="font-mono text-xs font-bold text-foreground">
+                            {scoreInfo.score.toFixed(4)}
+                          </span>
+                        </div>
+                      )}
+                      <WorkerStatusBadge state={worker.state} />
+                    </div>
+                  </div>
+
+                  {/* Telemetry Metrics Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
                         <Cpu className="h-3 w-3" />
-                        CPU Usage
+                        CPU Core Usage
                       </div>
                       <UsageBar value={worker.resources?.cpuUsagePercent ?? 0} />
                       <p className="text-[11px] text-muted-foreground">
-                        {worker.resources?.cpuCount} host cores
+                        {worker.resources?.cpuCount ?? 0} Cores assigned
                       </p>
                     </div>
 

@@ -11,8 +11,9 @@ import {
   deployments,
   deploymentLogs,
   deploymentEvents,
+  workerNodes,
 } from '../db/schema.js';
-import { selectBestWorker } from '../services/scheduler.js';
+import { selectBestWorker, evaluateWorkerEligibility } from '../services/scheduler.js';
 import { gatewayClient } from '../services/gateway-client.js';
 
 export const deploymentsRouter: Router = Router();
@@ -413,6 +414,147 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       error: {
         code: 'CANCEL_FAILED',
         message: 'Failed to cancel deployment',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/deployments/:id/relocate
+ * Manually relocates an active deployment to a specific target worker node.
+ * Evaluates target worker eligibility and hardware constraints.
+ * Body: { targetWorkerId: string }
+ */
+deploymentsRouter.post('/:id/relocate', requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { targetWorkerId } = req.body || {};
+
+  if (!targetWorkerId || typeof targetWorkerId !== 'string') {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'targetWorkerId is required and must be a string',
+      },
+    });
+    return;
+  }
+
+  try {
+    const existing = await db.select().from(deployments).where(eq(deployments.id, id));
+
+    if (existing.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: `Deployment '${id}' not found`,
+        },
+      });
+      return;
+    }
+
+    const current = existing[0];
+    if (
+      current.state === 'stopped' ||
+      current.state === 'failed' ||
+      current.state === 'cancelled'
+    ) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATE',
+          message: `Cannot relocate deployment in terminal state: ${current.state}`,
+        },
+      });
+      return;
+    }
+
+    if (current.workerId === targetWorkerId) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'SAME_TARGET',
+          message: `Deployment is already assigned to target worker '${targetWorkerId}'`,
+        },
+      });
+      return;
+    }
+
+    const targetRows = await db.select().from(workerNodes).where(eq(workerNodes.id, targetWorkerId));
+    if (targetRows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'WORKER_NOT_FOUND',
+          message: `Target worker '${targetWorkerId}' does not exist`,
+        },
+      });
+      return;
+    }
+
+    const targetWorker = targetRows[0];
+    const sourceWorkerId = current.workerId;
+
+    // Fetch app memory requirements
+    const appRows = await db.select().from(applications).where(eq(applications.id, current.applicationId));
+    const reqMemory = appRows.length > 0 ? appRows[0].memoryLimitMb : 512;
+
+    const eligibility = evaluateWorkerEligibility(targetWorker, reqMemory);
+    if (!eligibility.eligible) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'TARGET_INELIGIBLE',
+          message: `Target worker '${targetWorker.name}' is ineligible: ${eligibility.rejectionReasons.join(', ')}`,
+          details: eligibility.rejectionReasons,
+        },
+      });
+      return;
+    }
+
+    const now = new Date();
+
+    // Reassign deployment to target worker, reset port & containerId, set to queued
+    await db
+      .update(deployments)
+      .set({
+        workerId: targetWorkerId,
+        state: 'queued',
+        assignedPort: null,
+        containerId: null,
+        updatedAt: now,
+      })
+      .where(eq(deployments.id, id));
+
+    // Record audit event
+    await db.insert(deploymentEvents).values({
+      deploymentId: id,
+      eventType: 'RELOCATED',
+      details: `Workload manually relocated from worker '${sourceWorkerId || 'none'}' to '${targetWorker.name}' (${targetWorkerId})`,
+      timestamp: now,
+    });
+
+    const updatedRows = await db.select().from(deployments).where(eq(deployments.id, id));
+
+    res.status(200).json({
+      success: true,
+      message: `Workload '${id}' successfully relocated to '${targetWorker.name}'`,
+      data: mapDeploymentRow(updatedRows[0]),
+      relocation: {
+        deploymentId: id,
+        sourceWorkerId,
+        targetWorkerId,
+        targetWorkerName: targetWorker.name,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'RELOCATE_FAILED',
+        message: 'Failed to relocate deployment',
         details: error instanceof Error ? error.message : String(error),
       },
     });
