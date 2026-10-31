@@ -20,6 +20,7 @@ export class DeploymentRunner {
   private controlPlaneClient: ControlPlaneClient;
   private metricsService: MetricsService;
   private activeDeployments: Set<string> = new Set();
+  private activeAttemptIds: Map<string, string | undefined> = new Map();
   private inProgressControllers: Map<string, AbortController> = new Map();
 
   constructor(
@@ -58,6 +59,7 @@ export class DeploymentRunner {
 
     const abortController = new AbortController();
     this.activeDeployments.add(deploymentId);
+    this.activeAttemptIds.set(deploymentId, task.attemptId);
     this.inProgressControllers.set(deploymentId, abortController);
     this.metricsService.registerWorkload(deploymentId);
 
@@ -166,6 +168,7 @@ export class DeploymentRunner {
       const resultPayload: DeploymentResultPayload = {
         deploymentId,
         workerId: workerConfig.WORKER_ID,
+        attemptId: task.attemptId,
         state: 'running',
         containerId: runResult.containerId,
         assignedPort: runResult.assignedPort,
@@ -208,6 +211,7 @@ export class DeploymentRunner {
       const failedResult: DeploymentResultPayload = {
         deploymentId,
         workerId: workerConfig.WORKER_ID,
+        attemptId: task.attemptId,
         state: isAbort ? 'stopped' : 'failed',
         gitCommitHash: commitSha ?? undefined,
         imageTag: imageTag ?? undefined,
@@ -225,6 +229,7 @@ export class DeploymentRunner {
     } finally {
       this.inProgressControllers.delete(deploymentId);
       this.activeDeployments.delete(deploymentId);
+      this.activeAttemptIds.delete(deploymentId);
     }
   }
 
@@ -251,6 +256,7 @@ export class DeploymentRunner {
       await this.controlPlaneClient.reportResult({
         deploymentId,
         workerId: workerConfig.WORKER_ID,
+        attemptId: this.activeAttemptIds.get(deploymentId),
         state: 'stopped',
       });
     } catch {

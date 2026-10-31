@@ -90,6 +90,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             .update(deployments)
             .set({
               workerId: null,
+              attemptId: null,
               updatedAt: now,
             })
             .where(eq(deployments.id, dep.id));
@@ -115,6 +116,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             .set({
               state: 'queued',
               workerId: null,
+              attemptId: null,
               containerId: null,
               assignedPort: null,
               publicUrl: null,
@@ -140,6 +142,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             .update(deployments)
             .set({
               state: 'failed',
+              attemptId: null,
               errorMessage: `Worker node '${worker.id}' went offline and maximum recovery retry limit (${MAX_RETRY_COUNT}) was exceeded.`,
               finishedAt: now,
               updatedAt: now,
