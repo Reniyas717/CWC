@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { DataError } from '@/components/ui/data-error';
 
 export function ApplicationsPage() {
   const queryClient = useQueryClient();
@@ -32,13 +33,19 @@ export function ApplicationsPage() {
   const [selectedFramework, setSelectedFramework] = React.useState<string>('all');
   const [actionSuccess, setActionSuccess] = React.useState<string | null>(null);
 
-  const { data: apps = [], isLoading } = useQuery<AppConfig[]>({
+  const {
+    data: apps = [],
+    isLoading,
+    isError: isAppsError,
+    error: appsError,
+    refetch: refetchApps,
+  } = useQuery<AppConfig[]>({
     queryKey: ['applications'],
     queryFn: () => api.getApplications(),
     refetchInterval: 10000,
   });
 
-  const { data: deployments = [] } = useQuery<Deployment[]>({
+  const { data: deployments = [], isError: isDeploymentsError, error: deploymentsError } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
@@ -51,6 +58,7 @@ export function ApplicationsPage() {
       setActionSuccess(`Deployment ${dep.id} initiated on peer cluster.`);
       setTimeout(() => setActionSuccess(null), 4000);
     },
+    onError: (error: Error) => setActionSuccess(`Redeploy failed: ${error.message}`),
   });
 
   const cancelMutation = useMutation({
@@ -60,6 +68,7 @@ export function ApplicationsPage() {
       setActionSuccess('Workload deployment cancelled.');
       setTimeout(() => setActionSuccess(null), 4000);
     },
+    onError: (error: Error) => setActionSuccess(`Cancellation failed: ${error.message}`),
   });
 
   // Filter apps
@@ -186,11 +195,17 @@ export function ApplicationsPage() {
       </div>
 
       {actionSuccess && (
-        <div className="p-3 bg-secondary/80 border border-border rounded-md text-foreground text-xs flex items-center justify-between gap-2">
+        <div className={`p-3 border rounded-md text-xs flex items-center justify-between gap-2 ${actionSuccess.includes('failed') ? 'bg-destructive/10 border-destructive/20 text-destructive' : 'bg-secondary/80 border-border text-foreground'}`}>
           <span>{actionSuccess}</span>
           <span className="text-[10px] font-mono text-muted-foreground">Cluster Sync</span>
         </div>
       )}
+
+      {isAppsError ? (
+        <DataError error={appsError} onRetry={() => void refetchApps()} />
+      ) : isDeploymentsError ? (
+        <DataError title="Unable to load deployment state" error={deploymentsError} />
+      ) : null}
 
       {/* Summary Metrics Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

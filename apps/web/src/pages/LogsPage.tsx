@@ -16,6 +16,7 @@ import { api } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DataError } from '@/components/ui/data-error';
 
 export function LogsPage() {
   const [selectedDeploymentId, setSelectedDeploymentId] = React.useState<string>('all');
@@ -26,7 +27,12 @@ export function LogsPage() {
   const terminalEndRef = React.useRef<HTMLDivElement>(null);
 
   // Fetch all deployments
-  const { data: deployments = [] } = useQuery<Deployment[]>({
+  const {
+    data: deployments = [],
+    isError: isDeploymentsError,
+    error: deploymentsError,
+    refetch: refetchDeployments,
+  } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
@@ -42,6 +48,8 @@ export function LogsPage() {
     data: logs = [],
     isLoading,
     isFetching,
+    isError: isLogsError,
+    error: logsError,
     refetch,
   } = useQuery<DeploymentLogEntry[]>({
     queryKey: ['deployment-logs', activeDep?.id],
@@ -150,6 +158,11 @@ export function LogsPage() {
           </Button>
         </div>
       </div>
+
+      {isDeploymentsError && (
+        <DataError title="Unable to load deployments" error={deploymentsError} onRetry={() => void refetchDeployments()} />
+      )}
+      {isLogsError && <DataError title="Unable to load deployment logs" error={logsError} onRetry={() => void refetch()} />}
 
       {/* Main Terminal Shell */}
       <Card className="overflow-hidden border border-border shadow-md flex flex-col h-[74vh]">

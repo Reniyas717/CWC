@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { DataError } from '@/components/ui/data-error';
 
 function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
   if (state === 'running') {
@@ -80,7 +81,13 @@ export function DeploymentsPage() {
   const queryClient = useQueryClient();
   const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
 
-  const { data: deployments = [], isLoading } = useQuery<Deployment[]>({
+  const {
+    data: deployments = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
@@ -111,6 +118,12 @@ export function DeploymentsPage() {
           Live build logs, worker container lifecycle, and dynamic edge route assignments.
         </p>
       </div>
+
+      {isError && <DataError error={error} onRetry={() => void refetch()} />}
+
+      {cancelMutation.isError && (
+        <DataError title="Deployment cancellation failed" error={cancelMutation.error} />
+      )}
 
       {/* Summary Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -155,7 +168,7 @@ export function DeploymentsPage() {
             </Card>
           ))}
         </div>
-      ) : deployments.length === 0 ? (
+      ) : isError ? null : deployments.length === 0 ? (
         <Card className="border border-dashed border-border p-10 text-center">
           <div className="max-w-sm mx-auto space-y-3">
             <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mx-auto">

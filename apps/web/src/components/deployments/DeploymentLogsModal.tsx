@@ -16,6 +16,7 @@ import { Deployment, DeploymentLogEntry } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DataError } from '@/components/ui/data-error';
 
 interface DeploymentLogsModalProps {
   deployment: Deployment | null;
@@ -34,7 +35,14 @@ export function DeploymentLogsModal({
   const [autoScroll, setAutoScroll] = React.useState(true);
   const terminalEndRef = React.useRef<HTMLDivElement>(null);
 
-  const { data: logs = [], isLoading, isFetching, refetch } = useQuery<DeploymentLogEntry[]>({
+  const {
+    data: logs = [],
+    isLoading,
+    isFetching,
+    isError,
+    error,
+    refetch,
+  } = useQuery<DeploymentLogEntry[]>({
     queryKey: ['deployment-logs', deployment?.id],
     queryFn: () => (deployment ? api.getDeploymentLogs(deployment.id) : Promise.resolve([])),
     enabled: isOpen && !!deployment,
@@ -254,6 +262,8 @@ export function DeploymentLogsModal({
               <RotateCw className="h-4 w-4 animate-spin" />
               <span>Fetching container log stream...</span>
             </div>
+          ) : isError ? (
+            <DataError title="Unable to load deployment logs" error={error} onRetry={() => void refetch()} />
           ) : filteredLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-muted-foreground space-y-1">
               <p>No log entries found for this filter.</p>
