@@ -257,21 +257,53 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
 });
 
 /**
+ * Formats API collection responses with optional pagination support.
+ */
+function sendCollectionResponse<T>(
+  res: Response,
+  allData: T[],
+  pageNum?: number,
+  limitNum?: number
+) {
+  const totalCount = allData.length;
+  if (pageNum !== undefined && limitNum !== undefined) {
+    const start = (pageNum - 1) * limitNum;
+    const pagedData = allData.slice(start, start + limitNum);
+    res.status(200).json({
+      success: true,
+      count: pagedData.length,
+      data: pagedData,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        totalCount,
+        totalPages: Math.max(1, Math.ceil(totalCount / limitNum)),
+      },
+    });
+    return;
+  }
+
+  res.status(200).json({
+    success: true,
+    count: totalCount,
+    data: allData,
+  });
+}
+
+/**
  * GET /api/v1/deployments
- * Lists all deployments, with optional filtering by applicationId.
+ * Lists all deployments, with optional filtering by applicationId and optional pagination.
  * Open in dev mode, guarded by optionalAdmin.
  */
 deploymentsRouter.get('/', optionalAdmin, async (req: Request, res: Response) => {
-  const { applicationId } = req.query;
+  const { applicationId, page, limit } = req.query;
   const appId = typeof applicationId === 'string' ? applicationId : undefined;
+  const pageNum = page ? Math.max(1, parseInt(String(page), 10) || 1) : undefined;
+  const limitNum = limit ? Math.max(1, parseInt(String(limit), 10) || 10) : undefined;
 
   if (!isDatabaseAvailable()) {
     const data = memoryStore.getDeployments(appId);
-    res.status(200).json({
-      success: true,
-      count: data.length,
-      data,
-    });
+    sendCollectionResponse(res, data, pageNum, limitNum);
     return;
   }
 
@@ -288,19 +320,10 @@ deploymentsRouter.get('/', optionalAdmin, async (req: Request, res: Response) =>
     }
 
     const data: Deployment[] = rows.map(mapDeploymentRow);
-
-    res.status(200).json({
-      success: true,
-      count: data.length,
-      data,
-    });
+    sendCollectionResponse(res, data, pageNum, limitNum);
   } catch (error) {
     const data = memoryStore.getDeployments(appId);
-    res.status(200).json({
-      success: true,
-      count: data.length,
-      data,
-    });
+    sendCollectionResponse(res, data, pageNum, limitNum);
   }
 });
 

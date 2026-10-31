@@ -57,37 +57,52 @@ function mapWorkerRowToNode(row: typeof workerNodes.$inferSelect): WorkerNode {
 /**
  * GET /api/v1/workers
  * Lists all registered worker nodes. Open in dev mode, guarded by optionalAdmin.
+ * Supports optional pagination via ?page=1&limit=10.
  */
-workersRouter.get('/', optionalAdmin, async (_req: Request, res: Response) => {
-  if (!isDatabaseAvailable()) {
-    const data = memoryStore.getWorkers();
-    res.status(200).json({
+workersRouter.get('/', optionalAdmin, async (req: Request, res: Response) => {
+  const { page, limit } = req.query;
+  const pageNum = page ? Math.max(1, parseInt(String(page), 10) || 1) : undefined;
+  const limitNum = limit ? Math.max(1, parseInt(String(limit), 10) || 10) : undefined;
+
+  const sendResponse = (data: WorkerNode[], msg: string) => {
+    const totalCount = data.length;
+    if (pageNum !== undefined && limitNum !== undefined) {
+      const start = (pageNum - 1) * limitNum;
+      const pagedData = data.slice(start, start + limitNum);
+      return res.status(200).json({
+        success: true,
+        data: pagedData,
+        count: pagedData.length,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          totalCount,
+          totalPages: Math.max(1, Math.ceil(totalCount / limitNum)),
+        },
+        message: msg,
+      });
+    }
+
+    return res.status(200).json({
       success: true,
       data,
-      count: data.length,
-      message: 'Worker nodes retrieved successfully (dev in-memory mode)',
+      count: totalCount,
+      message: msg,
     });
-    return;
+  };
+
+  if (!isDatabaseAvailable()) {
+    const data = memoryStore.getWorkers();
+    return sendResponse(data, 'Worker nodes retrieved successfully (dev in-memory mode)');
   }
 
   try {
     const rows = await db.select().from(workerNodes);
     const data: WorkerNode[] = rows.map(mapWorkerRowToNode);
-
-    res.status(200).json({
-      success: true,
-      data,
-      count: data.length,
-      message: 'Worker nodes retrieved successfully',
-    });
+    return sendResponse(data, 'Worker nodes retrieved successfully');
   } catch (error) {
     const data = memoryStore.getWorkers();
-    res.status(200).json({
-      success: true,
-      data,
-      count: data.length,
-      message: 'Worker nodes retrieved from dev fallback mode',
-    });
+    return sendResponse(data, 'Worker nodes retrieved from dev fallback mode');
   }
 });
 
