@@ -108,8 +108,51 @@ DOCKERHUB_REPOSITORY=$3
 BUILD_CONTEXT=${4:-.}
 DOCKERFILE=${5:-Dockerfile}
 
-if [[ ! $REPOSITORY_URL =~ ^https://[^/]+/.+ ]]; then
-  emit_result failure validation "repository URL must be a public HTTPS Git URL"
+validate_repository_url() {
+  local authority host port octet private_ip
+  if [[ ! $REPOSITORY_URL =~ ^https://([^/]+)(/.+) ]]; then
+    return 1
+  fi
+
+  authority=${BASH_REMATCH[1]}
+  [[ $authority != *'@'* ]] || return 1
+
+  if [[ $authority == \[*\]:* ]]; then
+    host=${authority#\[}
+    host=${host%%\]*}
+    port=${authority#*\]:}
+    [[ -z $port || $port =~ ^[0-9]+$ ]] || return 1
+    host=${host,,}
+    case "$host" in
+      ::1|::|fc*|fd*|fe8*|fe9*|fea*|feb*) return 1 ;;
+    esac
+  else
+    host=$authority
+    if [[ $host == *:* ]]; then
+      port=${host##*:}
+      host=${host%:*}
+      [[ $port =~ ^[0-9]+$ ]] || return 1
+    fi
+    [[ -n $host && $host != *[[:space:]]* ]] || return 1
+    host=${host,,}
+    case "$host" in
+      localhost|localhost.*|*.localhost|127.*|10.*|192.168.*|169.254.*|0.0.0.0) return 1 ;;
+      172.[1][6-9].*|172.[2][0-9].*|172.[3][0-1].*) return 1 ;;
+    esac
+    if [[ $host =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+      IFS=. read -r -a octets <<< "$host"
+      for octet in "${octets[@]}"; do
+        (( 10#$octet <= 255 )) || return 1
+      done
+      private_ip=$((10#${octets[0]} == 10 || 10#${octets[0]} == 127 || 10#${octets[0]} == 0))
+      (( private_ip == 0 )) || return 1
+    fi
+  fi
+  [[ -n $host ]]
+}
+
+if ! validate_repository_url; then
+  emit_result failure validation "repository URL must be a public HTTPS Git URL without credentials or private host literals"
   exit 2
 fi
 if [[ -z $BRANCH || $BRANCH == -* ]]; then
@@ -129,11 +172,6 @@ if ! command -v git >/dev/null 2>&1; then
   emit_result failure prerequisites "git is not installed"
   exit 1
 fi
-if ! command -v docker >/dev/null 2>&1; then
-  emit_result failure prerequisites "docker is not installed"
-  exit 1
-fi
-
 ensure_docker_daemon() {
   if docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
     log "Docker daemon is ready"
@@ -162,16 +200,6 @@ ensure_docker_daemon() {
   fi
   return 2
 }
-
-if ensure_docker_daemon; then
-  :
-else
-  startup_status=$?
-  if (( startup_status == 2 )); then
-    fail docker-readiness "Docker daemon did not become ready"
-  fi
-  fail docker-start "unable to start the Docker daemon"
-fi
 
 WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cwc-build.XXXXXX")
 log "cloning ${REPOSITORY_URL} (branch ${BRANCH})"
@@ -206,6 +234,21 @@ if [[ ! -d $BUILD_CONTEXT_PATH ]]; then
 fi
 if [[ ! -f $DOCKERFILE_PATH ]]; then
   fail validation "Dockerfile is not a regular file: ${DOCKERFILE}"
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  emit_result failure prerequisites "docker is not installed"
+  exit 1
+fi
+
+if ensure_docker_daemon; then
+  :
+else
+  startup_status=$?
+  if (( startup_status == 2 )); then
+    fail docker-readiness "Docker daemon did not become ready"
+  fi
+  fail docker-start "unable to start the Docker daemon"
 fi
 
 IMAGE_REF="${DOCKERHUB_REPOSITORY}:${COMMIT_SHA}"

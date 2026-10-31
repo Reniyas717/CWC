@@ -15,7 +15,7 @@ The script builds for the local Docker daemon's default Linux architecture. Work
 ## Usage
 
 ```bash
-./deploy/build-and-publish.sh \
+bash deploy/build-and-publish.sh \
   https://github.com/example/project.git \
   main \
   dockerhub-owner/project
@@ -26,7 +26,7 @@ The required arguments are the public HTTPS Git URL, branch name, and Docker Hub
 For a monorepo, pass an optional repository-relative build context and Dockerfile path:
 
 ```bash
-./deploy/build-and-publish.sh \
+bash deploy/build-and-publish.sh \
   https://github.com/example/project.git \
   main \
   dockerhub-owner/project \
@@ -53,7 +53,7 @@ Failures exit nonzero and include `status`, `stage`, and `error`; the commit SHA
 The caller owns persistent log storage and may impose a timeout externally, for example:
 
 ```bash
-timeout 20m ./deploy/build-and-publish.sh \
+timeout 20m bash deploy/build-and-publish.sh \
   https://github.com/example/project.git main dockerhub-owner/project
 ```
 
