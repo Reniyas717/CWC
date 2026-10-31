@@ -59,6 +59,7 @@ assert.equal(response.status, 200);
 assert.equal((await response.json()).data.publicUrl, published.data.publicUrl);
 
 await tunnelExitHandlers[0]();
+await new Promise((resolve) => setTimeout(resolve, 1100));
 const recovered = manager.get('demo');
 assert.equal(recovered.status, 'ready');
 assert.notEqual(recovered.publicUrl, published.data.publicUrl);
@@ -84,6 +85,20 @@ response = await fetch(endpoint, { method: 'PUT', headers: { authorization: 'Bea
 assert.equal(response.status, 500);
 response = await fetch(endpoint, { headers: { authorization: 'Bearer test-token' } });
 assert.equal((await response.json()).data.publicUrl, replaced.data.publicUrl);
+
+let restartFailures = 1;
+tunnel.start = async (port, options) => {
+  if (restartFailures > 0) {
+    restartFailures -= 1;
+    throw new Error('transient tunnel restart failure');
+  }
+  return tunnelStart(port, options);
+};
+await tunnelExitHandlers[2]();
+await new Promise((resolve) => setTimeout(resolve, 1100));
+assert.equal(manager.get('demo').status, 'restarting');
+await new Promise((resolve) => setTimeout(resolve, 2200));
+assert.equal(manager.get('demo').status, 'ready');
 
 response = await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token' } });
 assert.equal(response.status, 200);
