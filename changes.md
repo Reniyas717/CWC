@@ -169,3 +169,16 @@ Updated route handlers to apply auth guards:
 - **Type Checking**: Passed `pnpm check-types` across all packages with 0 errors.
 - **Linting**: Passed `pnpm lint` across the monorepo with 0 ESLint errors.
 - **Build**: Successfully compiled using `pnpm --filter @cloud-without-clouds/api build`.
+
+- **Manual Verification Steps & Results**:
+  - `POST /api/v1/deployments` without token returns `401 Unauthorized` with structured JSON:
+    ```json
+    { "success": false, "error": { "code": "UNAUTHORIZED", "message": "Valid admin authorization token required" } }
+    ```
+  - `POST /api/v1/deployments` with `Authorization: Bearer dev-admin-token-change-in-production` passes auth check.
+  - `POST /api/v1/workers/register` without token returns `401 Unauthorized`:
+    ```json
+    { "success": false, "error": { "code": "UNAUTHORIZED", "message": "Valid worker secret authorization token required" } }
+    ```
+  - `POST /api/v1/workers/register` with `Authorization: Bearer dev-worker-secret-token-change-in-production` passes auth check.
+- **Git Synchronization**: Merged remote worker and deploy updates and pushed to `main`.
