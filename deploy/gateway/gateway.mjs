@@ -576,13 +576,30 @@ export class RouteManager {
         // If an update cannot be health-checked, keep the last known-good
         // route for this deployment. In particular, one bad upstream must
         // never clear unrelated healthy routes.
-        if (previous?.status === 'ready' && previous.publicUrl) {
+        const sameAttempt =
+          previous?.attemptId === route.attemptId && previous?.status === 'ready' && previous.publicUrl;
+        if (sameAttempt) {
           restored.push(this.#public(previous));
           console.warn(
             `[Gateway] Keeping healthy route for ${route.deploymentId} after reconciliation failure:`,
             error instanceof Error ? error.message : String(error)
           );
         } else {
+          // A failed replacement must not leave the previous assignment's
+          // tunnel serving traffic for a new attempt, even if it targets the
+          // same worker IP and port. Remove the obsolete route and let the
+          // control plane retry publication on the next reconciliation.
+          if (previous) {
+            await this.#remove(route.deploymentId, {
+              ignoreMissing: true,
+              attemptId: previous.attemptId,
+            }).catch((cleanupError) => {
+              console.warn(
+                `[Gateway] Unable to remove obsolete route ${route.deploymentId}:`,
+                cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+              );
+            });
+          }
           console.warn(
             `[Gateway] Unable to restore route for ${route.deploymentId}:`,
             error instanceof Error ? error.message : String(error)

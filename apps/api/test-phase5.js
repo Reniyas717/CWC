@@ -199,6 +199,19 @@ async function runPhase5Tests() {
     const createDepJson = await createDepRes.json();
     const depId = createDepJson.data.id;
 
+    // Rejected active deletes must not call the gateway first. The 400 is
+    // deterministic even when the gateway is unavailable, protecting a live
+    // route from an accidental delete attempt.
+    const activeDeleteRes = await fetch(`${base}/api/v1/deployments/${depId}`, {
+      method: 'DELETE',
+      headers: adminHeaders,
+    });
+    const activeDeleteJson = await activeDeleteRes.json();
+    assert(
+      activeDeleteRes.status === 400 && activeDeleteJson.error?.code === 'ACTIVE_DEPLOYMENT',
+      'active deployment delete is rejected before gateway cleanup'
+    );
+
     // Worker polls task -> transitions to 'building'
     await fetch(`${base}/api/v1/workers/${workerWithTask}/tasks`, { headers: workerHeaders });
 

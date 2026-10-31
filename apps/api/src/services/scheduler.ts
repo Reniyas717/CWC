@@ -1,4 +1,4 @@
-import { eq, and, or, gte, asc } from 'drizzle-orm';
+import { eq, and, or, gte, asc, isNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workerNodes, deployments, deploymentEvents, applications } from '../db/schema.js';
 import { HEARTBEAT_TIMEOUT_MS } from './sweeper.js';
@@ -281,7 +281,7 @@ export async function schedulePendingDeployments(): Promise<number> {
     })
     .from(deployments)
     .innerJoin(applications, eq(deployments.applicationId, applications.id))
-    .where(eq(deployments.state, 'queued'))
+    .where(and(eq(deployments.state, 'queued'), isNull(deployments.routingError)))
     .orderBy(asc(deployments.createdAt));
 
   const pending = unassignedDeployments.filter(

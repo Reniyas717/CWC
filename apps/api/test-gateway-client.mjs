@@ -16,6 +16,14 @@ assert.equal(calls.length, 2);
 assert.match(String(calls[0].url), /\/v1\/routes\/demo\?attemptId=attempt-old$/);
 assert.equal(calls[0].options.method, 'DELETE');
 
+globalThis.fetch = async () =>
+  new Response(JSON.stringify({ success: true, data: { status: 'superseded' } }), { status: 200 });
+assert.equal(
+  await client.removeRoute('demo', 'attempt-old', 1, 0),
+  false,
+  'superseded cleanup is not treated as successful removal'
+);
+
 const route = {
   deploymentId: 'demo',
   attemptId: 'attempt-new',
