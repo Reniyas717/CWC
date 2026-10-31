@@ -10,6 +10,7 @@ import { ControlPlaneClient } from './control-plane-client.js';
 import { DockerEngine } from './docker-engine.js';
 import { GitRunner } from './git-runner.js';
 import { MetricsService } from './metrics.js';
+import { discoverTailscaleAddress } from './tailscale-address.js';
 
 const logger = createLogger('DeploymentRunner');
 
@@ -129,6 +130,12 @@ export class DeploymentRunner {
       addLog(`Docker image ${imageTag} build complete`, 'system', 'info');
 
       // Step 3: Run container with enforced caps & dynamic ephemeral port
+      const tailscaleAddress = discoverTailscaleAddress();
+      addLog(
+        `Publishing the application only on worker Tailscale address ${tailscaleAddress}...`,
+        'system',
+        'info'
+      );
       addLog(
         `Starting container with memory: ${task.resourceLimits.memoryLimitMb}MB, cpus: ${task.resourceLimits.cpuLimitCores}...`,
         'system',
@@ -137,6 +144,7 @@ export class DeploymentRunner {
       const runResult = await this.dockerEngine.runContainer({
         deploymentId,
         imageTag,
+        hostIp: tailscaleAddress,
         targetPort: task.targetPort,
         memoryLimitMb: task.resourceLimits.memoryLimitMb,
         cpuLimitCores: task.resourceLimits.cpuLimitCores,

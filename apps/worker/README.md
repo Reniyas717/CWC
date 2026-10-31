@@ -9,7 +9,7 @@ The **Distributed Worker Agent** is the local execution daemon of the **Cloud Wi
 - **Host Telemetry & Heartbeats:** Samples CPU usage, total/used/free memory, and active container counts; transmits heartbeats every 10 seconds (configurable) to `POST /api/v1/workers/heartbeat`.
 - **Task Polling:** Polls `GET /api/v1/workers/:id/tasks` every 3 seconds for new deployment tasks or stop/cancel directives.
 - **Git Orchestration:** Clones public Git repositories into isolated temporary workspace directories (`cwc-builds/<deployment-id>`) with validation against Git flag injection and path traversal.
-- **Docker Container Lifecycle:** Builds images using the repository Dockerfile, executes containers with mandatory resource limits (`--memory`, `--cpus`, `--pids-limit=256`), and binds to an ephemeral host port (`-p 0:<targetPort>`).
+- **Docker Container Lifecycle:** Builds images using the repository Dockerfile, executes containers with mandatory resource limits (`--memory`, `--cpus`, `--pids-limit=256`), and binds an ephemeral host port to the worker's validated Tailscale IPv4 address (`-p <tailscale-ip>:0:<targetPort>`).
 - **Health Verification:** Probes the running container over HTTP (`/` or custom `healthCheckPath`) to confirm readiness before reporting status.
 - **Result & Log Reporting:** Flushes stdout/stderr build and runtime logs (capped at 500 lines) and final deployment results (`POST /api/v1/internal/deployments/:id/result`).
 - **Lifecycle Cleanup & Reconciliation:** On startup, cleans up any orphan `cwc-` containers from previous crashes; on `SIGINT`/`SIGTERM` or stop task, halts and removes active containers cleanly.
@@ -24,6 +24,23 @@ The **Distributed Worker Agent** is the local execution daemon of the **Cloud Wi
 | **pnpm** | `v9.0.0+` or `v10.0.0+` | `pnpm -v` | Monorepo package manager |
 | **Docker Engine / CLI** | `v24.0.0+` | `docker version` | Docker daemon must be running |
 | **Git** | `v2.30.0+` | `git version` | Required on system PATH |
+
+### Private port support
+
+The worker does not report a deployment as running until Docker confirms that
+the assigned host port is bound to the exact Tailscale IPv4 address used during
+worker registration. Wildcard bindings (`0.0.0.0`, `::`) and bindings on any
+other interface are rejected, the container is removed, and the deployment is
+reported as failed. This check proves Docker's observed binding; it does not
+claim that a host firewall or the application itself is secure.
+
+Native Linux Docker Engine is the supported private-network configuration. On
+Windows with Ubuntu/WSL and Docker Desktop, the WSL Tailscale address may not
+be bindable by Docker Desktop's Linux VM. The worker therefore fails closed
+with an explicit private-routing error when Docker rejects the address or
+reports a wildcard/other-interface binding. Do not substitute a Windows LAN
+address or `localhost`; use a Linux Docker daemon on the same Tailscale host,
+or treat that worker as unsupported until its Docker networking is verified.
 
 ---
 
@@ -147,8 +164,8 @@ The test suite covers:
    - **Isolation:** Clones code into temporary directories (`%TEMP%/cwc-builds/<id>`).
    - **Security Checks:** Verifies deployment ID characters, validates Git ref format, and asserts that resolved Dockerfile and build context remain inside the cloned workspace.
    - **Kernel Limits:** Runs containers with `--memory="<limit>m"`, `--cpus="<limit>"`, `--pids-limit=256`, and `--restart=on-failure:3`.
-   - **Dynamic Ports:** Binds container to ephemeral host port (`-p 0:<targetPort>`), inspects Docker to retrieve the actual allocated host port, preventing port conflicts.
-   - **Health Probing:** Periodically requests `http://localhost:<assignedPort>/` with retries until HTTP 200 is confirmed.
+   - **Private Dynamic Ports:** Binds container to an ephemeral host port on the discovered Tailscale address (`-p <tailscale-ip>:0:<targetPort>`), inspects Docker's actual `HostIp`/`HostPort`, and rejects wildcard or mismatched bindings.
+   - **Health Probing:** Periodically requests `http://<tailscale-ip>:<assignedPort>/` with retries until HTTP 200 is confirmed, using the same address the gateway will route to.
    - **Cleanup:** Purges cloned workspace directory and registers container ID for lifecycle tracking.
 5. **Abort & Shutdown:**
    - Active deployments use `AbortController`; stop/cancel directives abort Git clones and Docker builds immediately.
@@ -182,9 +199,13 @@ The test suite covers:
   - **Cause:** Branch or commit ref starts with `-` or contains disallowed characters.
   - **Resolution:** Submit standard Git branch names (e.g., `main`, `release/v1.0`).
 
-- **`Container failed health check on http://localhost:<port>/ after 10 attempts`**
-  - **Cause:** The application inside the container either crashed, listens on a different internal port than `targetPort`, or takes longer to boot.
-  - **Resolution:** Check container logs streamed back to the Control Plane to inspect the application crash trace.
+- **`Private routing is unavailable` or `Docker published the app on ... instead of the worker Tailscale address`**
+  - **Cause:** Docker Desktop/WSL could not bind the host port to the worker's Tailscale interface, or the daemon returned a wildcard/other-interface binding.
+  - **Resolution:** Run the worker with a Linux Docker daemon that can bind the host Tailscale interface, or verify Docker Desktop's networking and repeat the private binding check. The deployment is intentionally not advertised while this check fails.
+
+- **`Container failed health check on http://<tailscale-ip>:<port>/`**
+  - **Cause:** The application inside the container either crashed, listens on a different internal port than `targetPort`, the Tailscale interface is not reachable from the worker, or it takes longer to boot.
+  - **Resolution:** Check container logs and verify the worker's Tailscale address and Docker binding from the gateway host.
 
 ---
 
@@ -195,5 +216,5 @@ The test suite covers:
   - Currently in `apps/api`, endpoints `/api/v1/workers/register` and `/api/v1/deployments` are `501 Not Implemented` stubs, while `/api/v1/workers/heartbeat`, `/api/v1/workers/:id/tasks`, `/api/v1/internal/deployments/:id/result`, and `/api/v1/internal/deployments/:id/logs` return `404 Not Found`.
   - The worker gracefully tolerates these statuses without crashing, retrying with exponential backoff. Once Teammate 2 wires the Drizzle ORM handlers, worker integration is fully operational out-of-the-box.
 - **Edge Routing (Teammate 4 - Build & Ingress Pipeline):**
-  - The worker binds containers to ephemeral host ports (`-p 0:<port>`) on `localhost` and reports `assignedPort` and `publicUrl` in the deployment result.
-  - Teammate 4's Caddy reverse proxy or Cloudflare Quick Tunnel connects upstream to this reported host port over Tailscale.
+  - The worker binds containers to ephemeral host ports on its Tailscale IPv4 and reports `assignedPort` plus the private `http://<tailscale-ip>:<assignedPort>` upstream only after Docker binding and health checks pass.
+  - Teammate 4's Caddy reverse proxy or Cloudflare Quick Tunnel connects to this reported upstream over Tailscale; a failed private binding produces no routable success result.
