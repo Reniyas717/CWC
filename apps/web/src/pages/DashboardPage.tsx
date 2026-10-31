@@ -74,7 +74,11 @@ export function DashboardPage() {
     refetchInterval: 5000,
   });
 
-  const { data: scores = [], isError: isScoresError, error: scoresError } = useQuery<WorkerScoreBreakdown[]>({
+  const {
+    data: scores = [],
+    isError: isScoresError,
+    error: scoresError,
+  } = useQuery<WorkerScoreBreakdown[]>({
     queryKey: ['worker-scores'],
     queryFn: () => api.getWorkerScores(512),
     refetchInterval: 5000,
@@ -148,10 +152,18 @@ export function DashboardPage() {
       <ApiHealthIndicator />
 
       {isWorkersError && (
-        <DataError title="Unable to load worker telemetry" error={workersError} onRetry={() => void refetchWorkers()} />
+        <DataError
+          title="Unable to load worker telemetry"
+          error={workersError}
+          onRetry={() => void refetchWorkers()}
+        />
       )}
       {isDeploymentsError && (
-        <DataError title="Unable to load deployment state" error={deploymentsError} onRetry={() => void refetchDeployments()} />
+        <DataError
+          title="Unable to load deployment state"
+          error={deploymentsError}
+          onRetry={() => void refetchDeployments()}
+        />
       )}
       {isScoresError && <DataError title="Unable to load scheduler scores" error={scoresError} />}
 
@@ -163,14 +175,18 @@ export function DashboardPage() {
             <Card key={idx} className="group hover:border-foreground/20 transition-all">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between mb-4">
-                  <p className="text-xs font-medium text-muted-foreground leading-none">{stat.title}</p>
+                  <p className="text-xs font-medium text-muted-foreground leading-none">
+                    {stat.title}
+                  </p>
                   <div className="h-7 w-7 rounded-md bg-secondary flex items-center justify-center shrink-0">
                     <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
                 </div>
                 <div className="space-y-0.5">
                   <div className="flex items-baseline gap-1.5 flex-wrap">
-                    <span className="text-2xl font-bold text-foreground tracking-tight">{stat.value}</span>
+                    <span className="text-2xl font-bold text-foreground tracking-tight">
+                      {stat.value}
+                    </span>
                     <span className="text-xs text-muted-foreground font-medium">{stat.unit}</span>
                   </div>
                   <p className="text-[11px] text-muted-foreground">{stat.description}</p>
@@ -240,7 +256,7 @@ export function DashboardPage() {
                         <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
                           <span>Worker: {dep.workerId || 'pending'}</span>
                           {dep.assignedPort && <span>• Port :{dep.assignedPort}</span>}
-                          {dep.publicUrl && (
+                          {dep.routingStatus === 'ready' && dep.publicUrl && (
                             <a
                               href={dep.publicUrl}
                               target="_blank"
@@ -301,7 +317,8 @@ export function DashboardPage() {
             <CardContent className="p-5 pt-0 flex-1 flex flex-col justify-between">
               {workers.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
-                  No workers registered. Start an agent with <code className="bg-secondary px-1 py-0.5 rounded">pnpm dev:worker</code>
+                  No workers registered. Start an agent with{' '}
+                  <code className="bg-secondary px-1 py-0.5 rounded">pnpm dev:worker</code>
                 </div>
               ) : (
                 <div className="divide-y divide-border">
@@ -355,9 +372,12 @@ export function DashboardPage() {
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="space-y-1">
-              <CardTitle className="text-sm font-semibold">Platform Architecture & Subsystems</CardTitle>
+              <CardTitle className="text-sm font-semibold">
+                Platform Architecture & Subsystems
+              </CardTitle>
               <CardDescription className="text-xs">
-                The distributed monorepo control plane, shared types, worker telemetry agent, and edge ingress are active.
+                The distributed monorepo control plane, shared types, worker telemetry agent, and
+                edge ingress are active.
               </CardDescription>
             </div>
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-md border border-emerald-500/20 shrink-0">
@@ -371,7 +391,10 @@ export function DashboardPage() {
             {topology.map((item) => {
               const Icon = item.icon;
               return (
-                <div key={item.index} className="p-4 bg-secondary/20 rounded-lg border border-border space-y-2">
+                <div
+                  key={item.index}
+                  className="p-4 bg-secondary/20 rounded-lg border border-border space-y-2"
+                >
                   <div className="flex items-center gap-2">
                     <div className="h-6 w-6 rounded-md bg-secondary flex items-center justify-center shrink-0">
                       <Icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -387,7 +410,9 @@ export function DashboardPage() {
           <div className="flex items-center justify-between gap-1.5 text-[11px] text-muted-foreground pt-3 border-t border-border flex-wrap">
             <div className="flex items-center gap-1.5">
               <ArrowUpRight className="h-3 w-3 shrink-0" />
-              <span>Phase 5 30s Heartbeat Sweeper & Phase 6 S(W) Resource Placement are integrated.</span>
+              <span>
+                Phase 5 30s Heartbeat Sweeper & Phase 6 S(W) Resource Placement are integrated.
+              </span>
             </div>
             <span className="font-mono text-[10px]">
               Edge: Cloudflare Quick Tunnel + Caddy Admin API (:2019)
@@ -397,10 +422,7 @@ export function DashboardPage() {
       </Card>
 
       {/* New Application Deployment Modal */}
-      <NewApplicationModal
-        isOpen={isDeployModalOpen}
-        onClose={() => setIsDeployModalOpen(false)}
-      />
+      <NewApplicationModal isOpen={isDeployModalOpen} onClose={() => setIsDeployModalOpen(false)} />
 
       {/* Terminal Log Viewer Modal */}
       <DeploymentLogsModal

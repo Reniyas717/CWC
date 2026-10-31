@@ -118,9 +118,9 @@ export const deployments = pgTable('deployments', {
   workerId: varchar('worker_id', { length: 128 }).references(() => workerNodes.id, {
     onDelete: 'set null',
   }),
-    // Unique identity for the current worker assignment. Reassigned attempts
-    // receive a new value so delayed reports cannot revive old work.
-    attemptId: varchar('attempt_id', { length: 128 }),
+  // Unique identity for the current worker assignment. Reassigned attempts
+  // receive a new value so delayed reports cannot revive old work.
+  attemptId: varchar('attempt_id', { length: 128 }),
   version: integer('version').notNull().default(1),
   gitCommitHash: varchar('git_commit_hash', { length: 64 }),
   gitBranch: varchar('git_branch', { length: 128 }).notNull().default('main'),
@@ -128,6 +128,9 @@ export const deployments = pgTable('deployments', {
   containerId: varchar('container_id', { length: 128 }),
   assignedPort: integer('assigned_port'),
   publicUrl: text('public_url'),
+  workerUrl: text('worker_url'),
+  routingStatus: varchar('routing_status', { length: 32 }).notNull().default('pending'),
+  routingError: text('routing_error'),
   errorMessage: text('error_message'),
   retryCount: integer('retry_count').notNull().default(0),
   startedAt: timestamp('started_at', { withTimezone: true }),

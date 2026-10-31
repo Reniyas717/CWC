@@ -50,6 +50,9 @@ function mapDeploymentRow(row: typeof deployments.$inferSelect): Deployment {
     containerId: row.containerId ?? undefined,
     assignedPort: row.assignedPort ?? undefined,
     publicUrl: row.publicUrl ?? undefined,
+    workerUrl: row.workerUrl ?? undefined,
+    routingStatus: (row.routingStatus as Deployment['routingStatus']) || 'pending',
+    routingError: row.routingError ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -390,6 +393,9 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
         // Invalidate the worker's assignment before notifying it. Any result
         // already in flight now fails the attempt-identity check.
         attemptId: null,
+        publicUrl: null,
+        routingStatus: 'failed',
+        routingError: 'Deployment cancelled; public route removed',
         finishedAt: now,
         updatedAt: now,
       })

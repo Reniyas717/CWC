@@ -12,6 +12,10 @@ export const DeploymentStateSchema = z.enum([
 ]);
 export type DeploymentState = z.infer<typeof DeploymentStateSchema>;
 
+/** Lifecycle of the public ingress route, independent from the worker container. */
+export const RoutingStatusSchema = z.enum(['pending', 'ready', 'failed']);
+export type RoutingStatus = z.infer<typeof RoutingStatusSchema>;
+
 export const DeploymentLogEntrySchema = z.object({
   id: z.string().uuid().optional(),
   timestamp: z.string().datetime(),
@@ -33,7 +37,12 @@ export const DeploymentSchema = z.object({
   attemptId: z.string().min(1).optional(),
   containerId: z.string().optional(),
   assignedPort: z.number().int().optional(),
+  /** Public edge URL. This is never the worker's private address. */
   publicUrl: z.string().url().optional(),
+  /** Private worker endpoint used by the gateway (not exposed as the public URL). */
+  workerUrl: z.string().url().optional(),
+  routingStatus: RoutingStatusSchema.default('pending'),
+  routingError: z.string().optional(),
   errorMessage: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -99,7 +108,9 @@ export const DeploymentResultPayloadSchema = z.object({
   state: z.enum(['running', 'failed', 'stopped']),
   containerId: z.string().optional(),
   assignedPort: z.number().int().optional(),
+  /** Legacy worker field; treated as a private URL by the control plane. */
   publicUrl: z.string().optional(),
+  workerUrl: z.string().optional(),
   gitCommitHash: z.string().optional(),
   imageTag: z.string().optional(),
   errorMessage: z.string().nullable().optional(),

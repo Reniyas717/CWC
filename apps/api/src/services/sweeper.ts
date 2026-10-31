@@ -45,7 +45,11 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
       .from(workerNodes)
       .where(
         and(
-          or(eq(workerNodes.state, 'idle'), eq(workerNodes.state, 'busy'), eq(workerNodes.state, 'error')),
+          or(
+            eq(workerNodes.state, 'idle'),
+            eq(workerNodes.state, 'busy'),
+            eq(workerNodes.state, 'error')
+          ),
           lt(workerNodes.lastHeartbeatAt, cutoff)
         )
       );
@@ -120,6 +124,9 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
               containerId: null,
               assignedPort: null,
               publicUrl: null,
+              workerUrl: null,
+              routingStatus: 'pending',
+              routingError: null,
               retryCount: nextRetry,
               updatedAt: now,
             })
@@ -180,7 +187,9 @@ export function startSweeper(intervalMs: number = SWEEPER_INTERVAL_MS): void {
     return;
   }
 
-  console.log(`[Sweeper] Starting heartbeat sweeper (interval: ${intervalMs / 1000}s, timeout: ${HEARTBEAT_TIMEOUT_MS / 1000}s)`);
+  console.log(
+    `[Sweeper] Starting heartbeat sweeper (interval: ${intervalMs / 1000}s, timeout: ${HEARTBEAT_TIMEOUT_MS / 1000}s)`
+  );
 
   sweeperIntervalId = setInterval(async () => {
     try {
