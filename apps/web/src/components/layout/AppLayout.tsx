@@ -15,8 +15,6 @@ import {
   ExternalLink,
   Workflow,
   Scale,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { api } from '@/services/api';
@@ -156,9 +154,9 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground font-sans selection:bg-primary/10">
-      {/* Top Navbar: Clean & uncluttered */}
+      {/* Top Navbar: Clean, Quiet, Fixed */}
       <header className="sticky top-0 z-30 h-13 border-b border-sidebar-border bg-sidebar/95 backdrop-blur-xs flex items-center justify-between px-3 sm:px-5">
-        {/* Left Side: Brand & Section */}
+        {/* Left Side: Mobile Toggle & Brand */}
         <div className="flex items-center gap-2.5">
           {/* Mobile Drawer Toggle (Only visible on mobile screens) */}
           <button
@@ -216,29 +214,14 @@ export function AppLayout() {
       </header>
 
       {/* Main Layout Area */}
-      <div className="flex-1 flex w-full relative">
+      <div className="flex-1 flex w-full">
         {/* Desktop Sticky Collapsible Sidebar */}
         <aside
-          className={`hidden md:flex flex-col border-r border-sidebar-border bg-sidebar sticky top-13 h-[calc(100vh-3.25rem)] transition-all duration-200 ease-in-out shrink-0 select-none relative ${
+          className={`hidden md:flex flex-col border-r border-sidebar-border bg-sidebar sticky top-13 h-[calc(100vh-3.25rem)] transition-all duration-200 ease-in-out shrink-0 select-none ${
             isCollapsed ? 'w-14' : 'w-56'
           }`}
         >
-          {/* Floating border edge toggle button */}
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="absolute -right-3 top-3 z-30 h-6 w-6 rounded-full border border-border bg-card shadow-xs flex items-center justify-center text-muted-foreground hover:text-foreground hover:scale-110 transition-all cursor-pointer"
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label="Toggle sidebar width"
-          >
-            {isCollapsed ? (
-              <ChevronRight className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronLeft className="h-3.5 w-3.5" />
-            )}
-          </button>
-
-          {/* Sidebar Top Header with Dedicated Collapse Toggle */}
+          {/* Single, Dedicated Collapse Header */}
           <div className="h-10 px-2.5 border-b border-sidebar-border flex items-center justify-between shrink-0">
             {!isCollapsed ? (
               <div className="flex items-center justify-between w-full">
@@ -311,33 +294,9 @@ export function AppLayout() {
             ))}
           </div>
 
-          {/* Sidebar Footer with Collapse Action and Version */}
-          <div className="p-2 border-t border-sidebar-border shrink-0">
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              className={`flex items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer w-full ${
-                isCollapsed
-                  ? 'h-8 w-8 mx-auto justify-center'
-                  : 'h-7.5 px-2 gap-2 text-xs font-medium justify-between'
-              }`}
-              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-label="Toggle sidebar"
-            >
-              {isCollapsed ? (
-                <PanelLeft className="h-3.5 w-3.5" />
-              ) : (
-                <>
-                  <div className="flex items-center gap-1.5">
-                    <PanelLeftClose className="h-3.5 w-3.5 shrink-0" />
-                    <span>Collapse</span>
-                  </div>
-                  <span className="text-[10px] font-mono text-muted-foreground/60">
-                    v0.1.0
-                  </span>
-                </>
-              )}
-            </button>
+          {/* Clean Sidebar Footer: Version Tag Only (No duplicate buttons) */}
+          <div className="p-3 border-t border-sidebar-border shrink-0 text-center font-mono text-[10px] text-muted-foreground/50 tracking-wider">
+            {!isCollapsed ? 'cwc v0.1.0' : 'v0.1'}
           </div>
         </aside>
 
