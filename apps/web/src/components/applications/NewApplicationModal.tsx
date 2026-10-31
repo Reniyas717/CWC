@@ -1,6 +1,22 @@
 import * as React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Plus, Trash2, GitBranch, Server, Cpu, HardDrive } from 'lucide-react';
+import {
+  X,
+  Plus,
+  Trash2,
+  GitBranch,
+  Server,
+  Cpu,
+  HardDrive,
+  Rocket,
+  Sparkles,
+  Globe,
+  Code,
+  FileCode,
+  Terminal,
+  ShieldCheck,
+  Zap,
+} from 'lucide-react';
 import { AppFramework, CreateAppInput } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -17,13 +33,23 @@ interface EnvRow {
   isSecret: boolean;
 }
 
-const FRAMEWORKS: { value: AppFramework; label: string; defaultPort: number }[] = [
-  { value: 'dockerfile', label: 'Dockerfile (Standard)', defaultPort: 3000 },
-  { value: 'nodejs', label: 'Node.js (Express/Fastify)', defaultPort: 3000 },
-  { value: 'python', label: 'Python (FastAPI/Flask)', defaultPort: 8000 },
-  { value: 'static', label: 'Static Web (Vite/HTML/SPA)', defaultPort: 80 },
-  { value: 'go', label: 'Go Web Service', defaultPort: 8080 },
+interface FrameworkOption {
+  value: AppFramework;
+  label: string;
+  defaultPort: number;
+  icon: React.ComponentType<{ className?: string }>;
+}
+
+const FRAMEWORKS: FrameworkOption[] = [
+  { value: 'dockerfile', label: 'Dockerfile', defaultPort: 3000, icon: FileCode },
+  { value: 'nodejs', label: 'Node.js', defaultPort: 3000, icon: Server },
+  { value: 'python', label: 'Python', defaultPort: 8000, icon: Code },
+  { value: 'static', label: 'Static Web', defaultPort: 80, icon: Globe },
+  { value: 'go', label: 'Go Service', defaultPort: 8080, icon: Terminal },
 ];
+
+const CPU_OPTIONS = [0.5, 1.0, 2.0, 4.0];
+const MEMORY_OPTIONS = [256, 512, 1024, 2048];
 
 export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProps) {
   const queryClient = useQueryClient();
@@ -33,10 +59,12 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
   const [framework, setFramework] = React.useState<AppFramework>('dockerfile');
   const [repoUrl, setRepoUrl] = React.useState('');
   const [branch, setBranch] = React.useState('main');
+  const [rootDirectory, setRootDirectory] = React.useState('/');
   const [port, setPort] = React.useState(3000);
   const [replicas, setReplicas] = React.useState(1);
   const [cpuLimitCores, setCpuLimitCores] = React.useState(1.0);
   const [memoryLimitMb, setMemoryLimitMb] = React.useState(512);
+  const [activeTemplate, setActiveTemplate] = React.useState<'custom' | 'express' | 'static' | 'python'>('custom');
   const [envVars, setEnvVars] = React.useState<EnvRow[]>([
     { key: 'NODE_ENV', value: 'production', isSecret: false },
   ]);
@@ -75,12 +103,14 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
   };
 
   const applyPreset = (presetType: 'express' | 'static' | 'python') => {
+    setActiveTemplate(presetType);
     if (presetType === 'express') {
       setName('Express Microservice');
       setSlug('express-microservice');
       setFramework('nodejs');
       setRepoUrl('https://github.com/cloud-without-clouds/demo-node-app.git');
       setBranch('main');
+      setRootDirectory('/');
       setPort(3000);
       setReplicas(2);
       setCpuLimitCores(1.0);
@@ -90,22 +120,24 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
         { key: 'PORT', value: '3000', isSecret: false },
       ]);
     } else if (presetType === 'static') {
-      setName('Vite Documentation Site');
+      setName('Vite Documentation');
       setSlug('vite-docs-site');
       setFramework('static');
       setRepoUrl('https://github.com/cloud-without-clouds/demo-static-web.git');
       setBranch('main');
+      setRootDirectory('/');
       setPort(80);
       setReplicas(1);
       setCpuLimitCores(0.5);
       setMemoryLimitMb(256);
       setEnvVars([{ key: 'APP_ENV', value: 'production', isSecret: false }]);
     } else {
-      setName('FastAPI Inference Service');
+      setName('FastAPI Inference API');
       setSlug('fastapi-service');
       setFramework('python');
       setRepoUrl('https://github.com/cloud-without-clouds/demo-python-api.git');
       setBranch('main');
+      setRootDirectory('/');
       setPort(8000);
       setReplicas(1);
       setCpuLimitCores(1.0);
@@ -160,7 +192,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
       git: {
         repositoryUrl: repoUrl.trim(),
         branch: branch.trim() || 'main',
-        rootDirectory: '/',
+        rootDirectory: rootDirectory.trim() || '/',
       },
       port: Number(port),
       replicas: Number(replicas),
@@ -176,264 +208,413 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
 
   if (!isOpen) return null;
 
+  const totalCores = (replicas * cpuLimitCores).toFixed(1);
+  const totalMemory =
+    replicas * memoryLimitMb >= 1024
+      ? `${((replicas * memoryLimitMb) / 1024).toFixed(1)} GB`
+      : `${replicas * memoryLimitMb} MB`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-xs overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-card border border-border rounded-xl shadow-lg my-8 flex flex-col max-h-[90vh] text-foreground">
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h2 className="text-base font-bold text-foreground">
-              Deploy New Application
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Configure Git repository source, target port, and distributed worker limits.
-            </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-background/80 backdrop-blur-xs no-scrollbar overflow-y-auto">
+      <div className="relative w-full max-w-4xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden text-foreground">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+              <Rocket className="h-4 w-4 text-foreground" />
+            </div>
+            <div>
+              <h2
+                className="text-base font-bold text-foreground leading-tight"
+                style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
+              >
+                Deploy Application
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Distributed container placement across developer workstations.
+              </p>
+            </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
+          <button
+            type="button"
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground"
+            className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+            aria-label="Close"
           >
             <X className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
 
-        {/* Quick Demo Presets */}
-        <div className="px-6 pt-3 pb-2.5 bg-secondary/40 border-b border-border flex items-center gap-2 overflow-x-auto text-xs">
-          <span className="text-muted-foreground font-medium whitespace-nowrap text-[11px]">Quick Presets:</span>
+        {/* Quick Presets Strip (Horizontal) */}
+        <div className="px-6 py-2.5 bg-secondary/30 border-b border-border flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 text-xs">
+          <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1 shrink-0">
+            <Sparkles className="h-3 w-3" />
+            Presets:
+          </span>
           <button
             type="button"
             onClick={() => applyPreset('express')}
-            className="px-2.5 py-1 rounded-md bg-card border border-border hover:border-primary text-foreground font-medium transition-colors cursor-pointer text-xs"
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              activeTemplate === 'express'
+                ? 'bg-primary text-primary-foreground shadow-2xs'
+                : 'bg-card border border-border text-foreground hover:border-foreground/30'
+            }`}
           >
-            Node.js Express API
+            <Server className="h-3 w-3" />
+            Node.js Express
           </button>
           <button
             type="button"
             onClick={() => applyPreset('static')}
-            className="px-2.5 py-1 rounded-md bg-card border border-border hover:border-primary text-foreground font-medium transition-colors cursor-pointer text-xs"
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              activeTemplate === 'static'
+                ? 'bg-primary text-primary-foreground shadow-2xs'
+                : 'bg-card border border-border text-foreground hover:border-foreground/30'
+            }`}
           >
-            Vite / Static Web
+            <Globe className="h-3 w-3" />
+            Vite SPA
           </button>
           <button
             type="button"
             onClick={() => applyPreset('python')}
-            className="px-2.5 py-1 rounded-md bg-card border border-border hover:border-primary text-foreground font-medium transition-colors cursor-pointer text-xs"
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              activeTemplate === 'python'
+                ? 'bg-primary text-primary-foreground shadow-2xs'
+                : 'bg-card border border-border text-foreground hover:border-foreground/30'
+            }`}
           >
+            <Code className="h-3 w-3" />
             Python FastAPI
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-4 space-y-4 text-xs">
-          {errorMsg && (
-            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-xs">
-              {errorMsg}
-            </div>
-          )}
-
-          {/* Section: Basic Identity */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-foreground">
-                Application Name *
-              </label>
-              <Input
-                placeholder="e.g. Express API Gateway"
-                value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-foreground">
-                Slug (URL Identifier) *
-              </label>
-              <Input
-                placeholder="express-api-gateway"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                required
-              />
-            </div>
-          </div>
-
-          {/* Section: Runtime Framework */}
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-              <Server className="h-3.5 w-3.5 text-muted-foreground" />
-              Runtime Framework
-            </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {FRAMEWORKS.map((fw) => (
-                <button
-                  key={fw.value}
-                  type="button"
-                  onClick={() => handleFrameworkChange(fw.value)}
-                  className={`px-3 py-2 text-left rounded-md border text-xs font-medium transition-colors cursor-pointer ${
-                    framework === fw.value
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border bg-card text-foreground hover:bg-accent'
-                  }`}
-                >
-                  <div className="font-semibold">{fw.label.split(' ')[0]}</div>
-                  <div className="text-[10px] opacity-75 truncate">{fw.label}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Section: Git Configuration */}
-          <div className="p-3.5 bg-secondary/30 border border-border rounded-lg space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-              <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-              Git Source Repository
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-2 space-y-1">
-                <label className="text-[11px] text-muted-foreground">Repository URL *</label>
-                <Input
-                  placeholder="https://github.com/organization/repo.git"
-                  value={repoUrl}
-                  onChange={(e) => setRepoUrl(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[11px] text-muted-foreground">Branch</label>
-                <Input
-                  placeholder="main"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Section: Networking & Resource Allocation */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-foreground">
-                Target Port
-              </label>
-              <Input
-                type="number"
-                min={1}
-                max={65535}
-                value={port}
-                onChange={(e) => setPort(Number(e.target.value))}
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-foreground">
-                Replicas
-              </label>
-              <Input
-                type="number"
-                min={1}
-                max={5}
-                value={replicas}
-                onChange={(e) => setReplicas(Number(e.target.value))}
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                <Cpu className="h-3 w-3 text-muted-foreground" />
-                CPU Cores
-              </label>
-              <select
-                value={cpuLimitCores}
-                onChange={(e) => setCpuLimitCores(Number(e.target.value))}
-                className="flex h-9 w-full rounded-md border border-input bg-card px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <option value={0.5}>0.5 Core</option>
-                <option value={1.0}>1.0 Core</option>
-                <option value={2.0}>2.0 Cores</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1">
-                <HardDrive className="h-3 w-3 text-muted-foreground" />
-                Memory Cap
-              </label>
-              <select
-                value={memoryLimitMb}
-                onChange={(e) => setMemoryLimitMb(Number(e.target.value))}
-                className="flex h-9 w-full rounded-md border border-input bg-card px-2 py-1 text-xs text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <option value={256}>256 MB</option>
-                <option value={512}>512 MB</option>
-                <option value={1024}>1024 MB (1GB)</option>
-                <option value={2048}>2048 MB (2GB)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Section: Environment Variables */}
-          <div className="space-y-2 pt-2 border-t border-border">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-foreground">
-                Environment Variables
-              </label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={addEnvRow}
-                className="h-6 text-xs flex items-center gap-1"
-              >
-                <Plus className="h-3 w-3" />
-                Add Row
-              </Button>
-            </div>
-
-            {envVars.length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No environment variables defined.</p>
-            ) : (
-              <div className="space-y-2">
-                {envVars.map((row, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <Input
-                      placeholder="KEY (e.g. PORT)"
-                      value={row.key}
-                      onChange={(e) => updateEnvRow(idx, 'key', e.target.value)}
-                      className="flex-1 font-mono uppercase text-xs"
-                    />
-                    <Input
-                      placeholder="VALUE"
-                      value={row.value}
-                      onChange={(e) => updateEnvRow(idx, 'value', e.target.value)}
-                      className="flex-1 font-mono text-xs"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeEnvRow(idx)}
-                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
+        {/* Form Body: Two-Column Horizontal Master/Detail (No visible scrollbar, but smoothly scrollable) */}
+        <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto no-scrollbar p-6">
+            {errorMsg && (
+              <div className="mb-4 p-3 bg-destructive/10 border border-destructive/20 rounded-md text-destructive text-xs">
+                {errorMsg}
               </div>
             )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Repository Source & Framework (~58%) */}
+              <div className="lg:col-span-7 space-y-4">
+                {/* Workload Identity */}
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-foreground">
+                        Application Name
+                      </label>
+                      <Input
+                        placeholder="Express API Gateway"
+                        value={name}
+                        onChange={(e) => {
+                          setActiveTemplate('custom');
+                          handleNameChange(e.target.value);
+                        }}
+                        required
+                        className="h-8.5 text-xs bg-background"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-foreground">
+                        URL Slug
+                      </label>
+                      <Input
+                        placeholder="express-api-gateway"
+                        value={slug}
+                        onChange={(e) => {
+                          setActiveTemplate('custom');
+                          setSlug(e.target.value);
+                        }}
+                        required
+                        className="h-8.5 text-xs font-mono bg-background"
+                      />
+                    </div>
+                  </div>
+
+                  {slug && (
+                    <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2 py-1 rounded bg-secondary/40 border border-border">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span className="truncate">
+                        Route: <span className="text-foreground">https://{slug}.trycloudflare.com</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Git Source */}
+                <div className="space-y-2 pt-3 border-t border-border">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                      <GitBranch className="h-3 w-3 text-muted-foreground" />
+                      Public Git Repository URL
+                    </label>
+                    <Input
+                      placeholder="https://github.com/organization/repo.git"
+                      value={repoUrl}
+                      onChange={(e) => {
+                        setActiveTemplate('custom');
+                        setRepoUrl(e.target.value);
+                      }}
+                      required
+                      className="h-8.5 text-xs font-mono bg-background"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-muted-foreground">Branch</label>
+                      <Input
+                        placeholder="main"
+                        value={branch}
+                        onChange={(e) => setBranch(e.target.value)}
+                        className="h-8 text-xs font-mono bg-background"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-muted-foreground">Root Directory</label>
+                      <Input
+                        placeholder="/"
+                        value={rootDirectory}
+                        onChange={(e) => setRootDirectory(e.target.value)}
+                        className="h-8 text-xs font-mono bg-background"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Framework Selector (Compact horizontal pills) */}
+                <div className="space-y-2 pt-3 border-t border-border">
+                  <div className="flex items-center justify-between text-xs">
+                    <label className="font-medium text-foreground">Runtime Framework</label>
+                    <span className="text-[11px] font-mono text-muted-foreground">Default port: {port}</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {FRAMEWORKS.map((fw) => {
+                      const Icon = fw.icon;
+                      const isSelected = framework === fw.value;
+                      return (
+                        <button
+                          key={fw.value}
+                          type="button"
+                          onClick={() => handleFrameworkChange(fw.value)}
+                          className={`px-3 py-2 rounded-lg text-left text-xs transition-all cursor-pointer flex items-center gap-2 border ${
+                            isSelected
+                              ? 'bg-secondary border-foreground/50 text-foreground font-semibold shadow-2xs'
+                              : 'bg-background border-border text-muted-foreground hover:bg-secondary/40 hover:text-foreground'
+                          }`}
+                        >
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{fw.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Environment Variables */}
+                <div className="space-y-2 pt-3 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-foreground">Environment Variables</label>
+                    <button
+                      type="button"
+                      onClick={addEnvRow}
+                      className="text-[11px] font-medium text-foreground hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add Variable
+                    </button>
+                  </div>
+
+                  {envVars.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground italic">No environment variables set.</p>
+                  ) : (
+                    <div className="space-y-1.5 max-h-32 overflow-y-auto no-scrollbar pr-0.5">
+                      {envVars.map((row, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5">
+                          <Input
+                            placeholder="KEY"
+                            value={row.key}
+                            onChange={(e) => updateEnvRow(idx, 'key', e.target.value)}
+                            className="flex-1 font-mono uppercase text-[11px] h-7.5 bg-background"
+                          />
+                          <Input
+                            placeholder="VALUE"
+                            value={row.value}
+                            onChange={(e) => updateEnvRow(idx, 'value', e.target.value)}
+                            className="flex-1 font-mono text-[11px] h-7.5 bg-background"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeEnvRow(idx)}
+                            className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-secondary transition-colors cursor-pointer shrink-0"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right Column: Deployment Inspector / Hardware Allocation (~42%) */}
+              <div className="lg:col-span-5 space-y-4 bg-secondary/20 p-4.5 rounded-xl border border-border">
+                <div className="flex items-center justify-between pb-2 border-b border-border">
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Zap className="h-3.5 w-3.5 text-foreground" />
+                    Machine & Peer Spec
+                  </span>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                    Least-Load Policy
+                  </span>
+                </div>
+
+                {/* Port & Replicas */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-muted-foreground">Target Port</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={port}
+                      onChange={(e) => setPort(Number(e.target.value))}
+                      required
+                      className="h-8 text-xs font-mono bg-background"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-muted-foreground">Replicas</label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={5}
+                      value={replicas}
+                      onChange={(e) => setReplicas(Number(e.target.value))}
+                      required
+                      className="h-8 text-xs font-mono bg-background"
+                    />
+                  </div>
+                </div>
+
+                {/* CPU Allocation */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
+                      <Cpu className="h-3 w-3" />
+                      CPU Allocation
+                    </span>
+                    <span className="font-mono text-foreground font-semibold text-xs">
+                      {cpuLimitCores} Core{cpuLimitCores > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {CPU_OPTIONS.map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setCpuLimitCores(val)}
+                        className={`py-1 rounded text-xs font-mono font-medium transition-colors cursor-pointer border ${
+                          cpuLimitCores === val
+                            ? 'bg-foreground text-background border-foreground font-bold'
+                            : 'bg-background text-muted-foreground border-border hover:bg-secondary hover:text-foreground'
+                        }`}
+                      >
+                        {val}C
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Memory Allocation */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
+                      <HardDrive className="h-3 w-3" />
+                      Memory Cap
+                    </span>
+                    <span className="font-mono text-foreground font-semibold text-xs">
+                      {memoryLimitMb >= 1024 ? `${memoryLimitMb / 1024} GB` : `${memoryLimitMb} MB`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1">
+                    {MEMORY_OPTIONS.map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setMemoryLimitMb(val)}
+                        className={`py-1 rounded text-xs font-mono font-medium transition-colors cursor-pointer border ${
+                          memoryLimitMb === val
+                            ? 'bg-foreground text-background border-foreground font-bold'
+                            : 'bg-background text-muted-foreground border-border hover:bg-secondary hover:text-foreground'
+                        }`}
+                      >
+                        {val >= 1024 ? `${val / 1024}G` : `${val}M`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Cluster Footprint Preview Card */}
+                <div className="space-y-2 pt-2 border-t border-border text-xs">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">Total Reserved:</span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {totalCores} Cores • {totalMemory}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">Isolation:</span>
+                    <span className="font-mono text-foreground text-[10px]">--pids-limit=256</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">Ingress:</span>
+                    <span className="text-foreground text-[10px]">Cloudflare Quick Tunnel</span>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-secondary/50 border border-border text-[11px] text-muted-foreground flex items-center gap-2">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <span>Assigned to lowest-load worker node across peer mesh.</span>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* Footer Actions */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={mutation.isPending}
-            >
-              {mutation.isPending ? 'Scheduling...' : 'Deploy Application'}
-            </Button>
+          {/* Sticky Modal Footer */}
+          <div className="flex items-center justify-between px-6 py-3 border-t border-border bg-card shrink-0">
+            <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+              <span>Peer mesh ready • Ephemeral port auto-bind</span>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Button type="button" variant="outline" onClick={onClose} className="h-8.5 text-xs">
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={mutation.isPending}
+                className="h-8.5 text-xs font-semibold flex items-center gap-1.5"
+              >
+                {mutation.isPending ? (
+                  <>
+                    <span className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                    Scheduling...
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="h-3.5 w-3.5" />
+                    Deploy Workload
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </form>
       </div>
