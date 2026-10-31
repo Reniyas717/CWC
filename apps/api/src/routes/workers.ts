@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { eq, and, or, asc, isNull, count, inArray } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import {
   WorkerRegistrationSchema,
   WorkerHeartbeatSchema,
@@ -522,10 +523,12 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
       }
 
       const now = new Date();
+      const attemptId = randomUUID();
       const updatedDeployments = await tx
         .update(deployments)
         .set({
           workerId: id,
+          attemptId,
           state: 'building',
           updatedAt: now,
         })
@@ -583,6 +586,7 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
 
     const taskPayload: DeploymentTaskPayload = {
       deploymentId: dep.id,
+      attemptId: dep.attemptId ?? undefined,
       applicationId: app.id,
       git: {
         repositoryUrl: app.repositoryUrl,
