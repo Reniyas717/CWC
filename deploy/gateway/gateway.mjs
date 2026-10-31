@@ -711,8 +711,34 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   if (host !== '127.0.0.1' && !isTailscaleIpv4(host)) {
     throw new Error('GATEWAY_BIND_HOST must be 127.0.0.1 or a Tailscale IPv4 address');
   }
-  manager.caddy
-    .clear()
+  async function ensureCaddyRunning() {
+    try {
+      const res = await fetch('http://127.0.0.1:2019/config/', { signal: AbortSignal.timeout(1000) });
+      if (res.ok) return;
+    } catch {
+      // Caddy not reachable yet
+    }
+    const caddyBin = process.platform === 'win32' ? resolve('deploy/bin/caddy.exe') : 'caddy';
+    const configPath = resolve('deploy/caddy-initial.json');
+    if (existsSync(caddyBin)) {
+      console.log('[Gateway] Auto-starting Caddy reverse proxy on 127.0.0.1:2019...');
+      const child = spawn(caddyBin, ['run', '--config', configPath], {
+        stdio: 'ignore',
+        detached: true,
+      });
+      child.unref();
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 150));
+        try {
+          const res = await fetch('http://127.0.0.1:2019/config/', { signal: AbortSignal.timeout(500) });
+          if (res.ok) return;
+        } catch {}
+      }
+    }
+  }
+
+  ensureCaddyRunning()
+    .then(() => manager.caddy.clear())
     .then(() => {
       server.listen(port, host, () => console.log(`Gateway service listening on ${host}:${port}`));
     })
