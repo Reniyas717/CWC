@@ -2,7 +2,6 @@ import * as React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Scale,
-  ArrowLeftRight,
   RefreshCw,
   Server,
   CheckCircle2,
@@ -10,6 +9,10 @@ import {
   Info,
   ShieldCheck,
   Laptop,
+  SlidersHorizontal,
+  Sparkles,
+  Zap,
+  Globe2,
 } from 'lucide-react';
 import { Deployment, WorkerNode, AppConfig } from '@cloud-without-clouds/shared';
 import { api, ClusterRebalanceResult } from '@/services/api';
@@ -38,6 +41,21 @@ export function EqualizerPage() {
     queryFn: () => api.getWorkers(),
     refetchInterval: 5000,
   });
+
+  // Fetch applications for real memory limits
+  const { data: apps = [] } = useQuery<AppConfig[]>({
+    queryKey: ['applications'],
+    queryFn: () => api.getApplications(),
+    refetchInterval: 10000,
+  });
+
+  const getAppMemoryMb = React.useCallback(
+    (appId: string) => {
+      const matched = apps.find((a) => a.id === appId || a.slug === appId);
+      return matched?.resourceLimits?.memoryLimitMb ?? 512;
+    },
+    [apps]
+  );
 
   // Fetch deployments
   const {
@@ -70,7 +88,10 @@ export function EqualizerPage() {
       const freeRamGb = (freeRamMb / 1024).toFixed(1);
 
       // Total memory reserved by apps on this node (using exact app resource limits)
-      const allocatedMb = nodeDeployments.reduce((sum, d) => sum + getAppMemoryMb(d.applicationId), 0);
+      const allocatedMb = nodeDeployments.reduce(
+        (sum, d) => sum + getAppMemoryMb(d.applicationId),
+        0
+      );
       const allocatedGb = (allocatedMb / 1024).toFixed(1);
       const loadPercentage = Math.min(100, Math.round((allocatedMb / totalRamMb) * 100));
 
@@ -91,7 +112,7 @@ export function EqualizerPage() {
         deployments: nodeDeployments,
       };
     });
-  }, [activeWorkers, activeDeployments]);
+  }, [activeWorkers, activeDeployments, getAppMemoryMb]);
 
   // Overall cluster balance state
   const clusterSummary = React.useMemo(() => {
@@ -151,13 +172,14 @@ export function EqualizerPage() {
           setNotification({
             type: 'success',
             title: 'Cluster Equalized Successfully!',
-            message: `Moved ${result.migrations.length} app(s) to more powerful devices to balance hardware load.`,
+            message: `Moved ${result.migrations.length} app(s) to balance hardware capacity across all workstations.`,
           });
         } else {
           setNotification({
             type: 'info',
             title: 'Already Balanced',
-            message: 'All laptops and workstations are already sharing workloads fairly according to their specs.',
+            message:
+              'All laptops and workstations are already sharing workloads fairly according to their specs.',
           });
         }
       }
@@ -171,6 +193,91 @@ export function EqualizerPage() {
       });
     },
   });
+
+  // Direct 1-Click Quick Move Mutation
+  const quickMoveMutation = useMutation({
+    mutationFn: async ({
+      depId,
+      targetWorkerId,
+    }: {
+      depId: string;
+      targetWorkerId: string;
+      appName: string;
+      targetName: string;
+    }) => {
+      return api.relocateDeployment(depId, targetWorkerId);
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      setNotification({
+        type: 'success',
+        title: 'Workload Shifted Instantly!',
+        message: `Relocated "${variables.appName}" to ${variables.targetName}. Live loads updated.`,
+      });
+    },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : 'Quick move failed';
+      setNotification({
+        type: 'error',
+        title: 'Move Failed',
+        message: msg,
+      });
+    },
+  });
+
+  // 1-Click Strategy Presets
+  const applyStrategy = async (strategy: 'balanced' | 'desktop' | 'spread') => {
+    if (activeWorkers.length === 0 || activeDeployments.length === 0) return;
+
+    if (strategy === 'balanced') {
+      rebalanceMutation.mutate(false);
+      return;
+    }
+
+    if (strategy === 'desktop') {
+      // Find worker with largest total memory (e.g. Workstation Alpha 16GB)
+      const sortedByRam = [...activeWorkers].sort(
+        (a, b) => (b.resources?.totalMemoryMb ?? 0) - (a.resources?.totalMemoryMb ?? 0)
+      );
+      const desktopWorker = sortedByRam[0];
+      if (!desktopWorker) return;
+
+      for (const dep of activeDeployments) {
+        if (dep.workerId !== desktopWorker.id) {
+          await api.relocateDeployment(dep.id, desktopWorker.id);
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      setNotification({
+        type: 'success',
+        title: 'Desktop Priority Mode Applied!',
+        message: `Workloads shifted onto ${desktopWorker.name} (${(
+          (desktopWorker.resources?.totalMemoryMb ?? 16384) / 1024
+        ).toFixed(0)} GB RAM) to keep laptops quiet and save battery.`,
+      });
+      return;
+    }
+
+    if (strategy === 'spread') {
+      // Distribute evenly 1 by 1 across active workers
+      for (let i = 0; i < activeDeployments.length; i++) {
+        const targetWorker = activeWorkers[i % activeWorkers.length];
+        if (activeDeployments[i].workerId !== targetWorker.id) {
+          await api.relocateDeployment(activeDeployments[i].id, targetWorker.id);
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      setNotification({
+        type: 'success',
+        title: 'Distributed Spread Applied!',
+        message: `Workloads distributed evenly across ${activeWorkers.length} nodes for maximum resilience.`,
+      });
+      return;
+    }
+  };
 
   const handleRefresh = () => {
     refetchWorkers();
@@ -194,12 +301,12 @@ export function EqualizerPage() {
             </h1>
           </div>
           <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-            Automatically or manually distribute apps across your laptops and desktops based on
-            their hardware size.
+            Intelligently balance workloads across laptops and workstations based on their hardware
+            capacity.
           </p>
         </div>
 
-        {/* Action Buttons */}
+        {/* Action Controls */}
         <div className="flex items-center gap-2 shrink-0">
           <Button
             variant="outline"
@@ -236,7 +343,7 @@ export function EqualizerPage() {
             ) : (
               <>
                 <Scale className="h-3.5 w-3.5" />
-                <span>Equalize Load</span>
+                <span>Equalize Load Now</span>
               </>
             )}
           </Button>
@@ -294,7 +401,8 @@ export function EqualizerPage() {
                   </span>
                 )}
                 <span className="text-xs text-muted-foreground font-mono">
-                  {activeWorkers.length} online devices • {clusterSummary.totalClusterRamGb} GB total RAM
+                  {activeWorkers.length} online devices • {clusterSummary.totalClusterRamGb} GB total
+                  RAM
                 </span>
               </div>
 
@@ -310,8 +418,8 @@ export function EqualizerPage() {
               <p className="text-xs text-muted-foreground leading-relaxed">
                 A <strong>16 GB desktop</strong> can easily run multiple apps, while a{' '}
                 <strong>4 GB laptop</strong> should only run light tasks. Equalizing balances by{' '}
-                <strong>percentage of capacity</strong>, keeping small laptops cool while putting idle
-                workstations to work.
+                <strong>percentage of capacity</strong>, keeping small laptops cool while putting
+                idle workstations to work.
               </p>
             </div>
 
@@ -334,6 +442,49 @@ export function EqualizerPage() {
         </CardContent>
       </Card>
 
+      {/* Strategy Control Bar: Super Flexible Presets */}
+      <div className="p-3.5 bg-secondary/30 rounded-xl border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <span>Quick Balance Strategies:</span>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => applyStrategy('balanced')}
+            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+            className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Scale className="h-3.5 w-3.5 text-emerald-500" />
+            <span>Fair Capacity Share</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => applyStrategy('desktop')}
+            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+            className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Zap className="h-3.5 w-3.5 text-amber-500" />
+            <span>Desktop Priority</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => applyStrategy('spread')}
+            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+            className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
+          >
+            <Globe2 className="h-3.5 w-3.5 text-sky-500" />
+            <span>Distributed Spread</span>
+          </Button>
+        </div>
+      </div>
+
       {/* Connected Devices Grid (Clear, intuitive, beautiful) */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -341,7 +492,7 @@ export function EqualizerPage() {
             className="text-base font-bold text-foreground"
             style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
           >
-            Connected Devices & Their Workloads
+            Connected Workstations & Running Apps
           </h2>
           <span className="text-xs text-muted-foreground font-mono">
             {activeDeployments.length} Active App{activeDeployments.length !== 1 ? 's' : ''} Running
@@ -449,7 +600,7 @@ export function EqualizerPage() {
                     {/* Apps Running on this Device */}
                     <div className="space-y-2 pt-1 border-t border-border">
                       <span className="text-[11px] font-semibold text-muted-foreground block">
-                        Apps on this machine ({device.deployments.length}):
+                        Workloads on this machine ({device.deployments.length}):
                       </span>
 
                       {device.deployments.length === 0 ? (
@@ -457,30 +608,69 @@ export function EqualizerPage() {
                           No apps assigned. Ready to take work.
                         </div>
                       ) : (
-                        <div className="space-y-1.5">
+                        <div className="space-y-2">
                           {device.deployments.map((dep) => (
                             <div
                               key={dep.id}
-                              className="p-2.5 rounded-lg border border-border bg-card flex items-center justify-between gap-2 text-xs"
+                              className="p-3 rounded-lg border border-border bg-card/80 space-y-2 text-xs"
                             >
-                              <div className="min-w-0">
-                                <p className="font-mono font-bold text-foreground truncate text-xs">
-                                  {dep.applicationId}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground font-mono">
-                                  Port {dep.assignedPort || 3000} • {getAppMemoryMb(dep.applicationId)} MB RAM
-                                </p>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="font-mono font-bold text-foreground truncate text-xs">
+                                    {dep.applicationId}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground font-mono">
+                                    Port {dep.assignedPort || 3000} •{' '}
+                                    {getAppMemoryMb(dep.applicationId)} MB RAM
+                                  </p>
+                                </div>
+
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setSelectedRelocateDep(dep)}
+                                  className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1"
+                                  title="Open detailed custom relocation modal"
+                                >
+                                  <SlidersHorizontal className="h-3 w-3" />
+                                  <span>Details</span>
+                                </Button>
                               </div>
 
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setSelectedRelocateDep(dep)}
-                                className="h-7 px-2 text-[11px] flex items-center gap-1 shrink-0 cursor-pointer"
-                              >
-                                <ArrowLeftRight className="h-3 w-3" />
-                                <span>Move</span>
-                              </Button>
+                              {/* Direct 1-Click Quick Move Chips */}
+                              <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-border/60">
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  Quick shift:
+                                </span>
+                                {activeWorkers
+                                  .filter((other) => other.id !== device.worker.id)
+                                  .map((other) => {
+                                    const otherGb = (
+                                      (other.resources?.totalMemoryMb ?? 8192) / 1024
+                                    ).toFixed(0);
+                                    const shortName = other.name.split(' ')[0];
+                                    return (
+                                      <button
+                                        key={other.id}
+                                        type="button"
+                                        disabled={quickMoveMutation.isPending}
+                                        onClick={() =>
+                                          quickMoveMutation.mutate({
+                                            depId: dep.id,
+                                            targetWorkerId: other.id,
+                                            appName: dep.applicationId,
+                                            targetName: other.name,
+                                          })
+                                        }
+                                        className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-secondary hover:bg-primary hover:text-primary-foreground border border-border transition-colors cursor-pointer flex items-center gap-1"
+                                        title={`Instantly shift ${dep.applicationId} to ${other.name}`}
+                                      >
+                                        <span>→ {shortName}</span>
+                                        <span className="opacity-60 text-[9px]">({otherGb}G)</span>
+                                      </button>
+                                    );
+                                  })}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -521,7 +711,9 @@ export function EqualizerPage() {
           setNotification({
             type: 'success',
             title: 'App Moved Successfully!',
-            message: `Workload ${selectedRelocateDep?.applicationId || ''} has been relocated to its new device.`,
+            message: `Workload ${
+              selectedRelocateDep?.applicationId || ''
+            } has been relocated to its new device.`,
           });
         }}
       />
