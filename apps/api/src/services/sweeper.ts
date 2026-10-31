@@ -59,11 +59,18 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
         )
       );
     for (const deployment of pendingRouteCleanup) {
+      const expectedState =
+        deployment.state === 'failed' ||
+        deployment.state === 'stopped' ||
+        deployment.state === 'cancelled'
+          ? deployment.state
+          : null;
+      if (!expectedState) continue;
       void removeDeploymentRoute({
         deploymentId: deployment.id,
         gatewayAttemptId: deployment.attemptId ?? undefined,
         currentAttemptId: deployment.attemptId ?? null,
-        expectedState: deployment.state,
+        expectedState,
       }).catch((error: unknown) => {
         console.warn(
           `[Sweeper] Retry route cleanup failed for ${deployment.id}:`,

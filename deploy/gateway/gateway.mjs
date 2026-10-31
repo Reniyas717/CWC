@@ -542,14 +542,53 @@ export class RouteManager {
       validateRouteInput(route, { allowLocal: this.allowLocal })
     );
 
-    await this.#clearRoutes();
     const restored = [];
-    try {
-      for (const route of validated) restored.push(await this.#publish(route));
-    } catch (error) {
-      for (const deploymentId of [...this.routes.keys()])
-        await this.#remove(deploymentId, { ignoreMissing: true }).catch(() => {});
-      throw error;
+    const desiredIds = new Set(validated.map((route) => route.deploymentId));
+
+    // Remove only routes that are no longer authoritative. A failed removal
+    // is retried on the next reconciliation and must not affect healthy apps.
+    for (const deploymentId of [...this.routes.keys()]) {
+      if (!desiredIds.has(deploymentId)) {
+        await this.#remove(deploymentId, { ignoreMissing: true }).catch((error) => {
+          console.warn(`[Gateway] Unable to remove stale route ${deploymentId}:`, error);
+        });
+      }
+    }
+
+    for (const route of validated) {
+      const previous = this.routes.get(route.deploymentId);
+      const unchanged =
+        previous?.status === 'ready' &&
+        previous.publicUrl &&
+        previous.attemptId === route.attemptId &&
+        previous.upstreamIp === route.upstreamIp &&
+        previous.upstreamPort === route.upstreamPort &&
+        previous.healthPath === route.healthPath;
+
+      if (unchanged) {
+        restored.push(this.#public(previous));
+        continue;
+      }
+
+      try {
+        restored.push(await this.#publish(route));
+      } catch (error) {
+        // If an update cannot be health-checked, keep the last known-good
+        // route for this deployment. In particular, one bad upstream must
+        // never clear unrelated healthy routes.
+        if (previous?.status === 'ready' && previous.publicUrl) {
+          restored.push(this.#public(previous));
+          console.warn(
+            `[Gateway] Keeping healthy route for ${route.deploymentId} after reconciliation failure:`,
+            error instanceof Error ? error.message : String(error)
+          );
+        } else {
+          console.warn(
+            `[Gateway] Unable to restore route for ${route.deploymentId}:`,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      }
     }
     return restored;
   }

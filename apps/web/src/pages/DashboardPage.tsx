@@ -86,6 +86,20 @@ export function DashboardPage() {
 
   const runningCount = deployments.filter((d) => d.state === 'running').length;
   const onlineWorkers = workers.filter((w) => w.state !== 'offline').length;
+  const readyRoutes = deployments.filter(
+    (deployment) =>
+      deployment.state === 'running' &&
+      deployment.routingStatus === 'ready' &&
+      typeof deployment.publicUrl === 'string' &&
+      deployment.publicUrl.startsWith('https://')
+  ).length;
+  const ingressStatus = isDeploymentsError
+    ? 'Unavailable'
+    : readyRoutes > 0
+      ? 'Live'
+      : deployments.length === 0
+        ? 'Idle'
+        : 'Pending';
 
   const stats = [
     {
@@ -111,8 +125,8 @@ export function DashboardPage() {
     },
     {
       title: 'Ingress & Gateway',
-      value: 'Live',
-      unit: 'Quick Tunnel',
+      value: ingressStatus,
+      unit: `${readyRoutes} ready route${readyRoutes === 1 ? '' : 's'}`,
       description: 'Zero-cost Caddy reverse proxy & tunnels',
       icon: GitBranch,
     },

@@ -31,6 +31,7 @@ async function registerWorker(id) {
       id,
       name: `Attempt test ${id}`,
       hostname: id,
+      ipAddress: '100.100.0.21',
       port: 5001,
       authToken: workerToken,
       resources: {

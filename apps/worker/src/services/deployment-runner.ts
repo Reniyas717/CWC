@@ -178,8 +178,22 @@ export class DeploymentRunner {
         errorMessage: null,
       };
 
-      // Report result and flush logs to Control Plane
-      await this.controlPlaneClient.reportResult(resultPayload);
+      // Report result and flush logs to Control Plane. A 409 means this
+      // worker lost the assignment while it was building or starting. The
+      // container is already running at this point, so remove it before
+      // returning; otherwise a reconnecting/stale worker can orphan work on
+      // the host even though the control plane rejected the result.
+      const reportResponse = await this.controlPlaneClient.reportResult(resultPayload);
+      if (!reportResponse.ok) {
+        await this.dockerEngine.forceRemoveContainer(runResult.containerId);
+        this.dockerEngine.unregisterActiveContainer(deploymentId);
+        this.metricsService.unregisterWorkload(deploymentId);
+        throw new Error(
+          reportResponse.statusCode === 409
+            ? 'Control plane rejected this deployment result as stale; running container was removed'
+            : `Control plane rejected deployment result (${reportResponse.statusCode}): ${reportResponse.error || 'unknown error'}`
+        );
+      }
       await this.controlPlaneClient.sendLogs({ deploymentId, logs: allLogs });
 
       logger.info(
