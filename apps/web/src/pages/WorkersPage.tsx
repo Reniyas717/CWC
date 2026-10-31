@@ -20,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DataError } from '@/components/ui/data-error';
 
 function WorkerStatusBadge({ state }: { state: WorkerNode['state'] }) {
   if (state === 'idle') {
@@ -67,13 +68,19 @@ export function WorkersPage() {
   const queryClient = useQueryClient();
   const [sweepFeedback, setSweepFeedback] = React.useState<SweepResult | null>(null);
 
-  const { data: workers = [], isLoading } = useQuery<WorkerNode[]>({
+  const {
+    data: workers = [],
+    isLoading,
+    isError: isWorkersError,
+    error: workersError,
+    refetch: refetchWorkers,
+  } = useQuery<WorkerNode[]>({
     queryKey: ['workers'],
     queryFn: () => api.getWorkers(),
     refetchInterval: 5000,
   });
 
-  const { data: scores = [] } = useQuery<WorkerScoreBreakdown[]>({
+  const { data: scores = [], isError: isScoresError, error: scoresError } = useQuery<WorkerScoreBreakdown[]>({
     queryKey: ['worker-scores'],
     queryFn: () => api.getWorkerScores(512),
     refetchInterval: 5000,
@@ -151,6 +158,16 @@ export function WorkersPage() {
         </div>
       )}
 
+      {isWorkersError ? (
+        <DataError error={workersError} onRetry={() => void refetchWorkers()} />
+      ) : isScoresError ? (
+        <DataError title="Unable to load scheduler scores" error={scoresError} />
+      ) : null}
+
+      {sweepMutation.isError && (
+        <DataError title="Cluster sweep failed" error={sweepMutation.error} />
+      )}
+
       {/* Summary Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -218,7 +235,7 @@ export function WorkersPage() {
             </Card>
           ))}
         </div>
-      ) : workers.length === 0 ? (
+      ) : isWorkersError ? null : workers.length === 0 ? (
         <Card className="border border-dashed border-border p-10 text-center">
           <div className="max-w-sm mx-auto space-y-3">
             <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mx-auto">

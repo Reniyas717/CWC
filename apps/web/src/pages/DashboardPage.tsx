@@ -25,6 +25,7 @@ import { Deployment } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown } from '@/services/api';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { DataError } from '@/components/ui/data-error';
 
 const topology = [
   {
@@ -51,19 +52,29 @@ export function DashboardPage() {
   const [isDeployModalOpen, setIsDeployModalOpen] = React.useState(false);
   const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
 
-  const { data: workers = [] } = useQuery({
+  const {
+    data: workers = [],
+    isError: isWorkersError,
+    error: workersError,
+    refetch: refetchWorkers,
+  } = useQuery({
     queryKey: ['workers'],
     queryFn: () => api.getWorkers(),
     refetchInterval: 5000,
   });
 
-  const { data: deployments = [] } = useQuery({
+  const {
+    data: deployments = [],
+    isError: isDeploymentsError,
+    error: deploymentsError,
+    refetch: refetchDeployments,
+  } = useQuery({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
   });
 
-  const { data: scores = [] } = useQuery<WorkerScoreBreakdown[]>({
+  const { data: scores = [], isError: isScoresError, error: scoresError } = useQuery<WorkerScoreBreakdown[]>({
     queryKey: ['worker-scores'],
     queryFn: () => api.getWorkerScores(512),
     refetchInterval: 5000,
@@ -135,6 +146,14 @@ export function DashboardPage() {
 
       {/* Backend API Health Indicator */}
       <ApiHealthIndicator />
+
+      {isWorkersError && (
+        <DataError title="Unable to load worker telemetry" error={workersError} onRetry={() => void refetchWorkers()} />
+      )}
+      {isDeploymentsError && (
+        <DataError title="Unable to load deployment state" error={deploymentsError} onRetry={() => void refetchDeployments()} />
+      )}
+      {isScoresError && <DataError title="Unable to load scheduler scores" error={scoresError} />}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
