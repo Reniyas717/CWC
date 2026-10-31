@@ -2,6 +2,7 @@ import {
   AppConfig,
   CreateAppInput,
   Deployment,
+  DeploymentSchema,
   DeploymentLogEntry,
   WorkerNode,
 } from '@cloud-without-clouds/shared';
@@ -35,6 +36,40 @@ export interface SweepResult {
   rescheduledDeployments: string[];
   failedDeployments: string[];
   timestamp: string;
+}
+
+/**
+ * Error returned when the dashboard cannot create a deployment through the
+ * control plane. Submission errors must reach the UI instead of being hidden
+ * behind a locally fabricated running deployment.
+ */
+export class ApiRequestError extends Error {
+  readonly status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+  }
+}
+
+async function getApiErrorMessage(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === 'object' && body !== null && 'error' in body) {
+      const error = body.error;
+      if (typeof error === 'object' && error !== null && 'message' in error) {
+        const message = error.message;
+        if (typeof message === 'string' && message.trim()) {
+          return message;
+        }
+      }
+    }
+  } catch {
+    // Some proxies return an empty or non-JSON error response.
+  }
+
+  return `Control plane rejected the deployment request (HTTP ${response.status}).`;
 }
 
 // Initial realistic applications
@@ -330,8 +365,6 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    let serverDeployment: Deployment | null = null;
-
     try {
       const payload = {
         name: input.name,
@@ -352,40 +385,46 @@ export const api = {
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.data) {
-          serverDeployment = json.data;
-        }
+      if (!res.ok) {
+        throw new ApiRequestError(await getApiErrorMessage(res), res.status);
       }
-    } catch {
-      // offline fallback
+
+      const json: unknown = await res.json();
+      const data =
+        typeof json === 'object' && json !== null && 'data' in json ? json.data : undefined;
+      const parsedDeployment = DeploymentSchema.safeParse(data);
+      if (!parsedDeployment.success) {
+        throw new ApiRequestError('Control plane returned an invalid deployment response.');
+      }
+
+      const serverDeployment: Deployment = parsedDeployment.data;
+
+      // Keep the locally cached application linked to the server-created
+      // application ID. The deployment ID/state shown after submission must
+      // come from the control plane, not from a dashboard-generated record.
+      const persistedApp: AppConfig = {
+        ...newApp,
+        id: serverDeployment.applicationId,
+      };
+
+      const currentApps = loadLocalApps();
+      saveLocalApps([persistedApp, ...currentApps]);
+
+      const currentDeps = loadLocalDeployments();
+      saveLocalDeployments([serverDeployment, ...currentDeps]);
+
+      return persistedApp;
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        throw error;
+      }
+
+      const message =
+        error instanceof Error && error.message
+          ? `Unable to reach the control plane: ${error.message}`
+          : 'Unable to reach the control plane. Check that the API is running and try again.';
+      throw new ApiRequestError(message);
     }
-
-    // Persist in local storage
-    const currentApps = loadLocalApps();
-    saveLocalApps([newApp, ...currentApps]);
-
-    const createdDeployment: Deployment = serverDeployment || {
-      id: `dep-${Date.now().toString(36)}`,
-      applicationId: newApp.id,
-      version: 1,
-      gitCommitHash: newApp.git.commitHash || 'a1b2c3d',
-      gitBranch: newApp.git.branch,
-      state: 'running',
-      workerId: 'worker-node-local-01',
-      containerId: `cwc-cnt-${Math.random().toString(36).substring(2, 9)}`,
-      assignedPort: 20000 + Math.floor(Math.random() * 5000),
-      publicUrl: `https://${newApp.slug}.trycloudflare.com`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-    };
-
-    const currentDeps = loadLocalDeployments();
-    saveLocalDeployments([createdDeployment, ...currentDeps]);
-
-    return newApp;
   },
 
   /**
