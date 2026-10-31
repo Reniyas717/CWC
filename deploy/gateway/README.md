@@ -27,3 +27,15 @@ For a systemd installation, copy `gateway.service.example` to
 environment file with a secret `GATEWAY_TOKEN`, then enable and start the unit.
 The Ubuntu/WSL host and its distribution must remain running; systemd cannot
 recover a powered-off laptop or stopped WSL instance.
+
+## Verification status
+
+The controlled API tests use fake Caddy, tunnel and upstream adapters and cover
+authentication, validation, readiness, route replacement, removal, tunnel
+restart, reconciliation and stale-route clearing. Real Caddy and Quick Tunnel
+verification remains pending in environments where those tools are installed;
+the current Ubuntu/WSL environment lacks both tools and requires interactive
+sudo for system installation. Before the demo, install them, run a local HTTP
+app through Caddy, then verify a second laptop with
+`curl http://<worker-tailscale-ip>:<assigned-port>/` and confirm the assigned
+port is bound to Tailscale/private interfaces rather than a public interface.
