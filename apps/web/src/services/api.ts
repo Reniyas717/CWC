@@ -8,7 +8,7 @@ import {
 } from '@cloud-without-clouds/shared';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'cwc-admin-token-super-secret-dev';
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'dev-admin-token-change-in-production';
 
 export class ApiRequestError extends Error {
   readonly status?: number;

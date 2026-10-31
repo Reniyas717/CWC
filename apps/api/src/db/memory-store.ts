@@ -245,32 +245,28 @@ class MemoryStore {
     // Seed Logs
     this.logs.set(d1.id, [
       {
-        id: 1,
-        deploymentId: d1.id,
+        id: '1',
         stream: 'system',
         level: 'info',
         message: 'Deployment received and scheduled to worker-node-local-01',
         timestamp: new Date(Date.now() - 1200000).toISOString(),
       },
       {
-        id: 2,
-        deploymentId: d1.id,
+        id: '2',
         stream: 'stdout',
         level: 'info',
         message: 'Cloning repository https://github.com/cloud-without-clouds/demo-node-app.git...',
         timestamp: new Date(Date.now() - 1198000).toISOString(),
       },
       {
-        id: 3,
-        deploymentId: d1.id,
+        id: '3',
         stream: 'stdout',
         level: 'info',
         message: 'Successfully built container image cwc-img-express-api-gateway',
         timestamp: new Date(Date.now() - 1196000).toISOString(),
       },
       {
-        id: 4,
-        deploymentId: d1.id,
+        id: '4',
         stream: 'system',
         level: 'info',
         message: 'Container started with assigned port 20015. Health checks passing.',
@@ -433,16 +429,14 @@ class MemoryStore {
     // Seed log entry
     this.logs.set(newDep.id, [
       {
-        id: 1,
-        deploymentId: newDep.id,
+        id: '1',
         stream: 'system',
         level: 'info',
         message: `Deployment scheduled to worker '${assignedWorkerId}'`,
         timestamp: new Date().toISOString(),
       },
       {
-        id: 2,
-        deploymentId: newDep.id,
+        id: '2',
         stream: 'stdout',
         level: 'info',
         message: `Container started on port ${port}. Ingress active at ${newDep.publicUrl}`,

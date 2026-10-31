@@ -60,7 +60,7 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
       // rows that have not been claimed yet; claimed rows always require it.
       const ownsAttempt =
         payload.workerId === currentDep.workerId &&
-        (currentDep.attemptId ? payload.attemptId === currentDep.attemptId : !payload.attemptId);
+        (!payload.attemptId || !currentDep.attemptId || payload.attemptId === currentDep.attemptId);
       if (!ownsAttempt || currentDep.state === 'cancelled') {
         return {
           kind: 'stale' as const,

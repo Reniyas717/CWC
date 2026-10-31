@@ -213,7 +213,7 @@ export class CaddyAdminClient {
             handle: [
               {
                 handler: 'reverse_proxy',
-                upstreams: [{ dial: `${route.upstreamIp}:${route.upstreamPort}` }],
+                upstreams: [{ dial: `${route.dialIp || route.upstreamIp}:${route.upstreamPort}` }],
                 health_checks: {
                   active: {
                     uri: route.healthPath,
@@ -365,7 +365,7 @@ export class RouteManager {
     try {
       health = await this.probe(target, { signal: AbortSignal.timeout(2000) });
     } catch (probeError) {
-      if (route.upstreamIp === '127.0.0.1') {
+      if (this.allowLocal) { route.dialIp = '127.0.0.1';
         const fallbackTarget = `http://localhost:${route.upstreamPort}${route.healthPath}`;
         try {
           health = await this.probe(fallbackTarget, { signal: AbortSignal.timeout(2000) });
