@@ -8,6 +8,7 @@ import { DockerEngine } from './services/docker-engine.js';
 import { GitRunner } from './services/git-runner.js';
 import { MetricsService } from './services/metrics.js';
 import { TaskPoller } from './services/task-poller.js';
+import { discoverTailscaleAddress } from './services/tailscale-address.js';
 
 const logger = createLogger('WorkerAgent');
 
@@ -17,23 +18,6 @@ let isShuttingDown = false;
 let isRegistered = false;
 let taskPoller: TaskPoller | null = null;
 let dockerEngine: DockerEngine | null = null;
-
-function resolveWorkerIp(): string {
-  if (process.env.TAILSCALE_IP) return process.env.TAILSCALE_IP;
-  const interfaces = os.networkInterfaces();
-  for (const ifaceList of Object.values(interfaces)) {
-    if (!ifaceList) continue;
-    for (const iface of ifaceList) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        const parts = iface.address.split('.').map(Number);
-        if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) {
-          return iface.address;
-        }
-      }
-    }
-  }
-  return '127.0.0.1';
-}
 
 async function bootstrap() {
   logger.info('==================================================');
@@ -91,12 +75,14 @@ async function bootstrap() {
     );
   }
 
-  // 3. Worker registration with Control Plane
+  // 3. Worker registration with Control Plane. Do not fall back to localhost:
+  // the gateway must only receive an address reachable over Tailscale.
+  const tailscaleAddress = discoverTailscaleAddress();
   const registrationPayload: WorkerRegistration = {
     id: workerConfig.WORKER_ID,
     name: workerConfig.WORKER_NAME,
     hostname: os.hostname(),
-    ipAddress: resolveWorkerIp(),
+    ipAddress: tailscaleAddress,
     port: workerConfig.WORKER_PORT,
     authToken: workerConfig.WORKER_SECRET_TOKEN,
     resources: initialResources,

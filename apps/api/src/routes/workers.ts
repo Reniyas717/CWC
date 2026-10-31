@@ -183,18 +183,6 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
 
   const payload = parseResult.data;
 
-  // Derive client IP address (prefer client-reported Tailscale or header forwarded)
-  let rawIp =
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-    req.socket.remoteAddress ||
-    '127.0.0.1';
-  if (rawIp === '::1' || rawIp === '::ffff:127.0.0.1') {
-    rawIp = '127.0.0.1';
-  } else if (rawIp.startsWith('::ffff:')) {
-    rawIp = rawIp.replace('::ffff:', '');
-  }
-  const clientIp = rawIp;
-
   const now = new Date();
 
   try {
@@ -205,7 +193,7 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
         id: payload.id,
         name: payload.name,
         hostname: payload.hostname,
-        ipAddress: clientIp,
+        ipAddress: payload.ipAddress,
         port: payload.port,
         state: 'idle',
         cpuCores: payload.resources.cpuCount,
@@ -224,7 +212,7 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
         set: {
           name: payload.name,
           hostname: payload.hostname,
-          ipAddress: clientIp,
+          ipAddress: payload.ipAddress,
           port: payload.port,
           state: 'idle',
           cpuCores: payload.resources.cpuCount,

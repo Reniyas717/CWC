@@ -220,7 +220,9 @@ The following commands are defined in the workspace `package.json` files and ver
 ### Package-Specific Build Commands
 - `packages/shared`: `pnpm --filter @cloud-without-clouds/shared build` (`tsup src/index.ts --format cjs,esm --dts`)
 - `apps/api`: `pnpm --filter @cloud-without-clouds/api build` (`tsup src/index.ts --format esm --out-dir dist`)
+- `apps/api` worker networking checks: `pnpm --filter @cloud-without-clouds/api test:worker-network` (requires API, PostgreSQL, and Redis)
 - `apps/worker`: `pnpm --filter @cloud-without-clouds/worker build` (`tsup src/index.ts --format esm --out-dir dist`)
+- `apps/worker` Tailscale discovery check: `pnpm --filter @cloud-without-clouds/worker test:tailscale-address`
 - `apps/web`: `pnpm --filter @cloud-without-clouds/web build` (`tsc -b && vite build`)
 
 ---

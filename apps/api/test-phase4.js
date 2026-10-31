@@ -43,6 +43,7 @@ async function runPhase4Tests() {
         id: workerId,
         name: 'Phase 4 Test Worker',
         hostname: 'p4-worker-host',
+        ipAddress: '100.100.0.2',
         port: 5001,
         authToken: workerToken,
         resources: {

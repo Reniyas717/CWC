@@ -518,6 +518,12 @@ All endpoints accept and return `application/json`. Data models reuse schemas fr
 
 ### Detailed Contract Specifications
 
+Worker registration must include the worker-reported `ipAddress`. The shared
+contract accepts only an IPv4 address in Tailscale's `100.64.0.0/10` range;
+the control plane stores that value instead of inferring an upstream from the
+HTTP transport peer. Missing or non-Tailscale addresses are rejected, and a
+worker without a discoverable Tailscale address fails closed before registering.
+
 #### 1. Worker Task Polling (MVP Dispatch Mechanism)
 - **Route:** `GET /api/v1/workers/:id/tasks`
 - **Headers:** `Authorization: Bearer <WORKER_SECRET_TOKEN>`

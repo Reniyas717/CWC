@@ -10,6 +10,7 @@
     "start": "node dist/index.js",
     "check-types": "tsc --noEmit",
     "lint": "eslint src",
+    "test:tailscale-address": "tsx src/test-tailscale-address.ts",
     "test": "tsx src/test-docker-runtime.ts",
     "test:runtime": "tsx src/test-docker-runtime.ts"
   },
