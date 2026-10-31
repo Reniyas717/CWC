@@ -248,13 +248,29 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
             outcome.attemptId ?? undefined
           );
 
-          if (!published?.publicUrl) {
+          if (!published) {
+            throw new Error('Gateway did not return a published route');
+          }
+          const publicationMatchesAssignment =
+            published.deploymentId === id &&
+            (published.attemptId ?? null) === (outcome.attemptId ?? null) &&
+            published.upstreamIp === upstreamIp.data &&
+            published.upstreamPort === outcome.assignedPort;
+          if (!publicationMatchesAssignment) {
+            throw new Error('Gateway returned a route for a different deployment attempt or upstream');
+          }
+          if (!published.publicUrl) {
             throw new Error('Gateway did not return a public HTTPS URL');
           }
 
           // The worker may have been stopped or reassigned while the gateway
           // request was in flight. Only the same running attempt may publish.
-          const guard = [eq(deployments.id, id), eq(deployments.state, 'running')];
+          const guard = [
+            eq(deployments.id, id),
+            eq(deployments.state, 'running'),
+            eq(deployments.workerId, targetWorkerId),
+            eq(deployments.assignedPort, outcome.assignedPort!),
+          ];
           if (outcome.attemptId) {
             guard.push(eq(deployments.attemptId, outcome.attemptId));
           } else if (targetWorkerId) {

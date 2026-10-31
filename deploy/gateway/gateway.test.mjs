@@ -205,6 +205,17 @@ const restored = await manager.reconcile(async () => [
 assert.equal(restored[0].status, 'ready');
 assert.equal(manager.get('restored').status, 'ready');
 
+const restoredAttempt = await manager.reconcile(async () => [
+  {
+    deploymentId: 'restored-attempt',
+    attemptId: 'attempt-restored',
+    upstreamIp: '100.70.86.53',
+    upstreamPort: healthPort,
+    healthPath: '/',
+  },
+]);
+assert.equal(restoredAttempt[0].attemptId, 'attempt-restored');
+
 response = await fetch(`http://127.0.0.1:${servicePort}/v1/reconcile`, {
   method: 'POST',
   headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
