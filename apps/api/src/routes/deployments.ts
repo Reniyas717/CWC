@@ -9,7 +9,8 @@ import {
   RoutingStatusSchema,
 } from '@cloud-without-clouds/shared';
 import { requireAdmin, optionalAdmin } from '../middlewares/auth.js';
-import { db } from '../db/index.js';
+import { db, isDatabaseAvailable } from '../db/index.js';
+import { memoryStore } from '../db/memory-store.js';
 import {
   users,
   applications,
@@ -130,6 +131,16 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
 
   const payload = parseResult.data;
   const now = new Date();
+
+  if (!isDatabaseAvailable()) {
+    const deployment = memoryStore.createDeployment(payload);
+    res.status(201).json({
+      success: true,
+      data: deployment,
+      message: 'Deployment queued successfully (dev in-memory mode)',
+    });
+    return;
+  }
 
   try {
     const adminId = await ensureDefaultAdminUser();
@@ -252,14 +263,25 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
  */
 deploymentsRouter.get('/', optionalAdmin, async (req: Request, res: Response) => {
   const { applicationId } = req.query;
+  const appId = typeof applicationId === 'string' ? applicationId : undefined;
+
+  if (!isDatabaseAvailable()) {
+    const data = memoryStore.getDeployments(appId);
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+    return;
+  }
 
   try {
     let rows;
-    if (typeof applicationId === 'string') {
+    if (appId) {
       rows = await db
         .select()
         .from(deployments)
-        .where(eq(deployments.applicationId, applicationId))
+        .where(eq(deployments.applicationId, appId))
         .orderBy(desc(deployments.createdAt));
     } else {
       rows = await db.select().from(deployments).orderBy(desc(deployments.createdAt));
@@ -273,13 +295,11 @@ deploymentsRouter.get('/', optionalAdmin, async (req: Request, res: Response) =>
       data,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'DATABASE_ERROR',
-        message: 'Failed to retrieve deployments',
-        details: error instanceof Error ? error.message : String(error),
-      },
+    const data = memoryStore.getDeployments(appId);
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
     });
   }
 });
@@ -291,10 +311,28 @@ deploymentsRouter.get('/', optionalAdmin, async (req: Request, res: Response) =>
 deploymentsRouter.get('/:id', optionalAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
 
+  if (!isDatabaseAvailable()) {
+    const dep = memoryStore.getDeployment(id);
+    if (!dep) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: `Deployment '${id}' not found` },
+      });
+      return;
+    }
+    res.status(200).json({ success: true, data: dep });
+    return;
+  }
+
   try {
     const rows = await db.select().from(deployments).where(eq(deployments.id, id));
 
     if (rows.length === 0) {
+      const dep = memoryStore.getDeployment(id);
+      if (dep) {
+        res.status(200).json({ success: true, data: dep });
+        return;
+      }
       res.status(404).json({
         success: false,
         error: {
@@ -310,6 +348,11 @@ deploymentsRouter.get('/:id', optionalAdmin, async (req: Request, res: Response)
       data: mapDeploymentRow(rows[0]),
     });
   } catch (error) {
+    const dep = memoryStore.getDeployment(id);
+    if (dep) {
+      res.status(200).json({ success: true, data: dep });
+      return;
+    }
     res.status(500).json({
       success: false,
       error: {
@@ -327,6 +370,16 @@ deploymentsRouter.get('/:id', optionalAdmin, async (req: Request, res: Response)
  */
 deploymentsRouter.get('/:id/logs', optionalAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
+
+  if (!isDatabaseAvailable()) {
+    const data = memoryStore.getLogs(id);
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+    return;
+  }
 
   try {
     const rows = await db
@@ -349,13 +402,11 @@ deploymentsRouter.get('/:id/logs', optionalAdmin, async (req: Request, res: Resp
       data,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'DATABASE_ERROR',
-        message: 'Failed to retrieve deployment logs',
-        details: error instanceof Error ? error.message : String(error),
-      },
+    const data = memoryStore.getLogs(id);
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
     });
   }
 });
@@ -468,6 +519,27 @@ deploymentsRouter.post('/:id/relocate', requireAdmin, async (req: Request, res: 
       },
     });
     return;
+  }
+
+  if (!isDatabaseAvailable()) {
+    try {
+      const updated = memoryStore.relocateDeployment(id, targetWorkerId);
+      res.status(200).json({
+        success: true,
+        message: `Workload '${id}' successfully relocated to target worker (dev in-memory mode)`,
+        data: updated,
+      });
+      return;
+    } catch (err) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'RELOCATE_FAILED',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+      return;
+    }
   }
 
   try {

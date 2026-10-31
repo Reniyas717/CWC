@@ -1,5 +1,5 @@
 import { eq, and, or, lt, inArray, isNotNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, isDatabaseAvailable } from '../db/index.js';
 import { workerNodes, deployments, deploymentEvents } from '../db/schema.js';
 import { removeWorkerFromCache } from '../cache/redis.js';
 import { removeDeploymentRoute } from './route-cleanup.js';
@@ -49,6 +49,11 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
     failedDeployments: [],
     timestamp: now.toISOString(),
   };
+
+  if (!isDatabaseAvailable()) {
+    return result;
+  }
+
   const routeCleanupTasks: RouteCleanupTask[] = [];
 
   try {

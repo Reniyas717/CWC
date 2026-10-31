@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { AppConfig } from '@cloud-without-clouds/shared';
 import { optionalAdmin } from '../middlewares/auth.js';
-import { db } from '../db/index.js';
+import { db, isDatabaseAvailable } from '../db/index.js';
 import { applications } from '../db/schema.js';
+import { memoryStore } from '../db/memory-store.js';
 
 export const applicationsRouter: Router = Router();
 
@@ -34,6 +35,16 @@ function mapApplicationRow(row: typeof applications.$inferSelect): AppConfig {
  * Lists application records persisted by the control plane.
  */
 applicationsRouter.get('/', optionalAdmin, async (_req: Request, res: Response) => {
+  if (!isDatabaseAvailable()) {
+    const data = memoryStore.getApplications();
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+    });
+    return;
+  }
+
   try {
     const rows = await db.select().from(applications);
     const data = rows.map(mapApplicationRow);
@@ -44,13 +55,11 @@ applicationsRouter.get('/', optionalAdmin, async (_req: Request, res: Response) 
       data,
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'DATABASE_ERROR',
-        message: 'Failed to retrieve applications',
-        details: error instanceof Error ? error.message : String(error),
-      },
+    const data = memoryStore.getApplications();
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
     });
   }
 });

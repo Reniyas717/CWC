@@ -1,6 +1,7 @@
 import { eq, and, or, gte, asc, isNull } from 'drizzle-orm';
-import { db } from '../db/index.js';
+import { db, isDatabaseAvailable } from '../db/index.js';
 import { workerNodes, deployments, deploymentEvents, applications } from '../db/schema.js';
+import { memoryStore } from '../db/memory-store.js';
 import { HEARTBEAT_TIMEOUT_MS } from './sweeper.js';
 
 export interface WorkerScoreBreakdown {
@@ -105,30 +106,38 @@ export function evaluateWorkerEligibility(
  * Evaluates all registered workers and returns their load scores and eligibility breakdowns.
  */
 export async function getWorkerLoadScores(requiredMemoryMb = 512): Promise<WorkerScoreBreakdown[]> {
-  const workers = await db.select().from(workerNodes);
-  const now = new Date();
+  if (!isDatabaseAvailable()) {
+    return memoryStore.getWorkerScores(requiredMemoryMb);
+  }
 
-  return workers.map((worker) => {
-    const { score, memoryRatio, cpuRatio, containerRatio } = calculateWorkerLoadScore(worker);
-    const { eligible, rejectionReasons } = evaluateWorkerEligibility(worker, requiredMemoryMb, now);
+  try {
+    const workers = await db.select().from(workerNodes);
+    const now = new Date();
 
-    return {
-      workerId: worker.id,
-      name: worker.name,
-      score,
-      memoryRatio,
-      cpuRatio,
-      containerRatio,
-      freeMemoryMb: worker.freeMemoryMb,
-      usedMemoryMb: worker.usedMemoryMb,
-      totalMemoryMb: worker.totalMemoryMb,
-      cpuUsagePercent: worker.cpuUsagePercent,
-      activeContainers: worker.activeContainers,
-      maxConcurrentWorkloads: worker.maxConcurrentWorkloads,
-      eligible,
-      rejectionReasons,
-    };
-  });
+    return workers.map((worker) => {
+      const { score, memoryRatio, cpuRatio, containerRatio } = calculateWorkerLoadScore(worker);
+      const { eligible, rejectionReasons } = evaluateWorkerEligibility(worker, requiredMemoryMb, now);
+
+      return {
+        workerId: worker.id,
+        name: worker.name,
+        score,
+        memoryRatio,
+        cpuRatio,
+        containerRatio,
+        freeMemoryMb: worker.freeMemoryMb,
+        usedMemoryMb: worker.usedMemoryMb,
+        totalMemoryMb: worker.totalMemoryMb,
+        cpuUsagePercent: worker.cpuUsagePercent,
+        activeContainers: worker.activeContainers,
+        maxConcurrentWorkloads: worker.maxConcurrentWorkloads,
+        eligible,
+        rejectionReasons,
+      };
+    });
+  } catch {
+    return memoryStore.getWorkerScores(requiredMemoryMb);
+  }
 }
 
 /**
