@@ -67,6 +67,7 @@ export class CaddyAdminClient {
   }
 
   async apply(route) {
+    const previous = this.routes.get(route.deploymentId);
     this.routes.set(route.deploymentId, route);
     const config = this.#config();
     const result = await this.fetch(`${this.baseUrl}/load`, {
@@ -75,19 +76,24 @@ export class CaddyAdminClient {
       body: JSON.stringify(config),
     });
     if (!result.ok) {
-      this.routes.delete(route.deploymentId);
+      if (previous) this.routes.set(route.deploymentId, previous);
+      else this.routes.delete(route.deploymentId);
       throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected the route (${result.status})`);
     }
   }
 
   async remove(deploymentId) {
+    const previous = this.routes.get(deploymentId);
     this.routes.delete(deploymentId);
     const result = await this.fetch(`${this.baseUrl}/load`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(this.#config()),
     });
-    if (!result.ok) throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected the route removal (${result.status})`);
+    if (!result.ok) {
+      if (previous) this.routes.set(deploymentId, previous);
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected the route removal (${result.status})`);
+    }
   }
 
   #config() {
@@ -117,8 +123,12 @@ export class QuickTunnel {
     this.spawn = spawnImpl;
   }
 
-  async start(listenerPort) {
+  async start(listenerPort, { onExit } = {}) {
     const child = this.spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stopped = false;
+    child.once('exit', () => {
+      if (!stopped) onExit?.();
+    });
     const output = async function* () {
       for await (const chunk of child.stderr) yield chunk.toString();
       for await (const chunk of child.stdout) yield chunk.toString();
@@ -133,7 +143,13 @@ export class QuickTunnel {
       if (next.done) break;
       buffer += next.value;
       const match = buffer.match(/https:\/\/(?!api\.)[-a-z0-9]+\.trycloudflare\.com/i);
-      if (match) return { url: match[0], stop: () => child.kill('SIGTERM') };
+      if (match) return {
+        url: match[0],
+        stop: () => {
+          stopped = true;
+          child.kill('SIGTERM');
+        },
+      };
     }
     child.kill('SIGTERM');
     throw new GatewayError(502, 'TUNNEL_START_FAILED', 'cloudflared did not provide a public URL');
@@ -147,6 +163,7 @@ export class RouteManager {
     this.probe = probe;
     this.listenerBase = listenerBase;
     this.routes = new Map();
+    this.nextListenerOffset = 0;
   }
 
   async publish(input) {
@@ -160,19 +177,34 @@ export class RouteManager {
     }
     if (!health.ok) throw new GatewayError(502, 'UPSTREAM_UNAVAILABLE', `upstream health check returned ${health.status}`);
 
-    await this.remove(route.deploymentId, { ignoreMissing: true });
-    const listenerPort = this.listenerBase + this.routes.size;
+    const previous = this.routes.get(route.deploymentId);
+    const listenerPort = this.listenerBase + this.nextListenerOffset;
+    this.nextListenerOffset += 1;
     const next = { ...route, listenerPort };
     await this.caddy.apply(next);
     let tunnel;
     try {
-      tunnel = await this.tunnel.start(listenerPort);
+      tunnel = await this.tunnel.start(listenerPort, { onExit: () => this.restartTunnel(route.deploymentId).catch(() => {}) });
     } catch (error) {
-      await this.caddy.remove(route.deploymentId).catch(() => {});
+      if (previous) await this.caddy.apply(previous).catch(() => {});
+      else await this.caddy.remove(route.deploymentId).catch(() => {});
       throw error;
     }
+    previous?.stopTunnel?.();
     const record = { ...next, status: 'ready', publicUrl: tunnel.url, stopTunnel: tunnel.stop };
     this.routes.set(route.deploymentId, record);
+    return this.#public(record);
+  }
+
+  async restartTunnel(deploymentId) {
+    const record = this.routes.get(deploymentId);
+    if (!record) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
+    record.status = 'restarting';
+    record.stopTunnel?.();
+    const tunnel = await this.tunnel.start(record.listenerPort, { onExit: () => this.restartTunnel(deploymentId).catch(() => {}) });
+    record.stopTunnel = tunnel.stop;
+    record.publicUrl = tunnel.url;
+    record.status = 'ready';
     return this.#public(record);
   }
 
@@ -182,8 +214,8 @@ export class RouteManager {
       if (!ignoreMissing) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
       return;
     }
-    record.stopTunnel?.();
     await this.caddy.remove(deploymentId);
+    record.stopTunnel?.();
     this.routes.delete(deploymentId);
   }
 
