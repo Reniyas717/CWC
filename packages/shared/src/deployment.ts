@@ -81,6 +81,8 @@ export type DeploymentTaskPayload = z.infer<typeof DeploymentTaskPayloadSchema>;
 export const DeploymentTaskResponseSchema = z.object({
   success: z.boolean(),
   hasTask: z.boolean(),
+  action: z.enum(['deploy', 'cancel', 'stop']).optional(),
+  deploymentId: z.string().optional(),
   task: DeploymentTaskPayloadSchema.optional(),
 });
 export type DeploymentTaskResponse = z.infer<typeof DeploymentTaskResponseSchema>;

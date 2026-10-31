@@ -2,11 +2,7 @@ import { Router, Request, Response } from 'express';
 import { eq, desc, asc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import {
-  Deployment,
-  DeploymentLogEntry,
-  AppFrameworkSchema,
-} from '@cloud-without-clouds/shared';
+import { Deployment, DeploymentLogEntry, AppFrameworkSchema } from '@cloud-without-clouds/shared';
 import { requireAdmin, optionalAdmin } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
 import {
@@ -17,6 +13,7 @@ import {
   deploymentEvents,
 } from '../db/schema.js';
 import { selectBestWorker } from '../services/scheduler.js';
+import { gatewayClient } from '../services/gateway-client.js';
 
 export const deploymentsRouter: Router = Router();
 
@@ -138,6 +135,19 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
 
       if (existingApp.length > 0) {
         appId = existingApp[0].id;
+        await db
+          .update(applications)
+          .set({
+            repositoryUrl: payload.git.repositoryUrl,
+            gitBranch: payload.git.branch,
+            rootDirectory: payload.git.rootDirectory,
+            targetPort: payload.port,
+            envVars: payload.env,
+            cpuLimitCores: payload.resourceLimits.cpuLimitCores,
+            memoryLimitMb: payload.resourceLimits.memoryLimitMb,
+            updatedAt: now,
+          })
+          .where(eq(applications.id, appId));
       } else {
         appId = `app-${randomUUID().slice(0, 8)}`;
         await db.insert(applications).values({
@@ -199,10 +209,7 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
       timestamp: now,
     });
 
-    const createdRows = await db
-      .select()
-      .from(deployments)
-      .where(eq(deployments.id, deploymentId));
+    const createdRows = await db.select().from(deployments).where(eq(deployments.id, deploymentId));
 
     res.status(201).json({
       success: true,
@@ -389,6 +396,9 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       details: 'Deployment cancelled by administrator',
       timestamp: now,
     });
+
+    // Remove route from Gateway
+    await gatewayClient.removeRoute(id);
 
     res.status(200).json({
       success: true,

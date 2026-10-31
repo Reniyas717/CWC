@@ -23,14 +23,15 @@ export class ReconciliationError extends GatewayError {
   }
 }
 
-export function validateRouteInput(input) {
+export function validateRouteInput(input, { allowLocal = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new GatewayError(400, 'INVALID_ROUTE', 'route input must be an object');
   }
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(input.deploymentId)) {
     throw new GatewayError(400, 'INVALID_DEPLOYMENT_ID', 'deploymentId must be a safe route identifier');
   }
-  if (!isTailscaleIpv4(input.upstreamIp)) {
+  const isLocal = allowLocal && (input.upstreamIp === '127.0.0.1' || input.upstreamIp === 'localhost');
+  if (!isTailscaleIpv4(input.upstreamIp) && !isLocal) {
     throw new GatewayError(400, 'INVALID_UPSTREAM_IP', 'upstreamIp must be a Tailscale IPv4 address');
   }
   if (!Number.isInteger(input.upstreamPort) || input.upstreamPort < 1 || input.upstreamPort > 65535) {
@@ -184,8 +185,10 @@ export class QuickTunnel {
 
   async start(listenerPort, { onExit } = {}) {
     let child;
+    const command = process.platform === 'win32' ? 'cloudflared.cmd' : 'cloudflared';
+    const options = process.platform === 'win32' ? { stdio: ['ignore', 'pipe', 'pipe'], shell: true } : { stdio: ['ignore', 'pipe', 'pipe'] };
     try {
-      child = this.spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = this.spawn(command, ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], options);
     } catch (error) {
       throw new GatewayError(502, 'TUNNEL_START_FAILED', `unable to start cloudflared: ${error.message}`);
     }
@@ -231,11 +234,12 @@ export class QuickTunnel {
 }
 
 export class RouteManager {
-  constructor({ caddy, tunnel, probe = fetch, listenerBase = DEFAULT_LISTENER_BASE } = {}) {
+  constructor({ caddy, tunnel, probe = fetch, listenerBase = DEFAULT_LISTENER_BASE, allowLocal = (process.env.GATEWAY_ALLOW_LOCAL === 'true' || process.env.NODE_ENV !== 'production') } = {}) {
     this.caddy = caddy ?? new CaddyAdminClient();
     this.tunnel = tunnel ?? new QuickTunnel();
     this.probe = probe;
     this.listenerBase = listenerBase;
+    this.allowLocal = allowLocal;
     this.routes = new Map();
     this.nextListenerOffset = 0;
     this.mutation = Promise.resolve();
@@ -252,13 +256,24 @@ export class RouteManager {
   }
 
   async #publish(input) {
-    const route = validateRouteInput(input);
+    const route = validateRouteInput(input, { allowLocal: this.allowLocal });
     const target = `http://${route.upstreamIp}:${route.upstreamPort}${route.healthPath}`;
     let health;
     try {
       health = await this.probe(target, { signal: AbortSignal.timeout(2000) });
-    } catch {
-      throw new GatewayError(502, 'UPSTREAM_UNAVAILABLE', 'upstream health check failed');
+    } catch (probeError) {
+      if (route.upstreamIp === '127.0.0.1') {
+        const fallbackTarget = `http://localhost:${route.upstreamPort}${route.healthPath}`;
+        try {
+          health = await this.probe(fallbackTarget, { signal: AbortSignal.timeout(2000) });
+        } catch {
+          console.warn(`[Gateway] Health check probe failed for ${target}:`, probeError?.cause ? probeError.cause : (probeError instanceof Error ? probeError.message : String(probeError)));
+          throw new GatewayError(502, 'UPSTREAM_UNAVAILABLE', 'upstream health check failed');
+        }
+      } else {
+        console.warn(`[Gateway] Health check probe failed for ${target}:`, probeError?.cause ? probeError.cause : (probeError instanceof Error ? probeError.message : String(probeError)));
+        throw new GatewayError(502, 'UPSTREAM_UNAVAILABLE', 'upstream health check failed');
+      }
     }
     if (!health.ok) throw new GatewayError(502, 'UPSTREAM_UNAVAILABLE', `upstream health check returned ${health.status}`);
 
@@ -376,7 +391,7 @@ export class RouteManager {
       throw new GatewayError(400, 'INVALID_RECONCILIATION', 'routes must be an array of deployments');
     }
 
-    const validated = desired.map((route) => validateRouteInput(route));
+    const validated = desired.map((route) => validateRouteInput(route, { allowLocal: this.allowLocal }));
 
     await this.#clearRoutes();
     const restored = [];

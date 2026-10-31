@@ -10,15 +10,8 @@ import {
 import { z } from 'zod';
 import { requireWorker, optionalAdmin } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
-import {
-  workerNodes,
-  deployments,
-  applications,
-} from '../db/schema.js';
-import {
-  recordWorkerHeartbeatInCache,
-  removeWorkerFromCache,
-} from '../cache/redis.js';
+import { workerNodes, deployments, applications } from '../db/schema.js';
+import { recordWorkerHeartbeatInCache, removeWorkerFromCache } from '../cache/redis.js';
 import { sweepWorkerHealth } from '../services/sweeper.js';
 import { getWorkerLoadScores, schedulePendingDeployments } from '../services/scheduler.js';
 
@@ -191,10 +184,16 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
   const payload = parseResult.data;
 
   // Derive client IP address (prefer client-reported Tailscale or header forwarded)
-  const clientIp =
+  let rawIp =
     (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
     req.socket.remoteAddress ||
     '127.0.0.1';
+  if (rawIp === '::1' || rawIp === '::ffff:127.0.0.1') {
+    rawIp = '127.0.0.1';
+  } else if (rawIp.startsWith('::ffff:')) {
+    rawIp = rawIp.replace('::ffff:', '');
+  }
+  const clientIp = rawIp;
 
   const now = new Date();
 
@@ -426,10 +425,7 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
 
   try {
     // Verify worker is registered
-    const existingWorker = await db
-      .select()
-      .from(workerNodes)
-      .where(eq(workerNodes.id, id));
+    const existingWorker = await db.select().from(workerNodes).where(eq(workerNodes.id, id));
 
     if (existingWorker.length === 0) {
       res.status(404).json({
@@ -438,6 +434,23 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
           code: 'WORKER_NOT_REGISTERED',
           message: `Worker node '${id}' is not registered. Please register first.`,
         },
+      });
+      return;
+    }
+
+    // Check if any deployment assigned to this worker was cancelled and needs to be stopped
+    const pendingCancellation = await db
+      .select()
+      .from(deployments)
+      .where(and(eq(deployments.workerId, id), eq(deployments.state, 'cancelled')))
+      .limit(1);
+
+    if (pendingCancellation.length > 0) {
+      res.status(200).json({
+        success: true,
+        hasTask: false,
+        action: 'cancel',
+        deploymentId: pendingCancellation[0].id,
       });
       return;
     }
@@ -502,7 +515,10 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
         commitHash: dep.gitCommitHash || undefined,
       },
       dockerfilePath: 'Dockerfile',
-      buildContext: '.',
+      buildContext:
+        app.rootDirectory && app.rootDirectory !== '/'
+          ? app.rootDirectory.replace(/^\/+/, '')
+          : '.',
       targetPort: app.targetPort,
       replicas: 1,
       resourceLimits: {

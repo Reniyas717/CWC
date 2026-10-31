@@ -38,3 +38,6 @@ Thumbs.db
 .docker-data/
 postgres-data/
 redis-data/
+
+# Local binaries
+deploy/bin/
