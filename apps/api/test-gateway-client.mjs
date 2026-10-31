@@ -16,4 +16,49 @@ assert.equal(calls.length, 2);
 assert.match(String(calls[0].url), /\/v1\/routes\/demo\?attemptId=attempt-old$/);
 assert.equal(calls[0].options.method, 'DELETE');
 
-console.log('ok - gateway route removal retries with attempt identity');
+const route = {
+  deploymentId: 'demo',
+  attemptId: 'attempt-new',
+  status: 'ready',
+  publicUrl: 'https://demo.trycloudflare.com',
+  listenerPort: 18080,
+  upstreamIp: '100.70.86.53',
+  upstreamPort: 8080,
+  healthPath: '/',
+};
+globalThis.fetch = async (_url, options) => {
+  const request = JSON.parse(options.body);
+  assert.equal(request.attemptId, 'attempt-new');
+  return new Response(JSON.stringify({ success: true, data: route }), { status: 201 });
+};
+const published = await client.publishRoute('demo', '100.70.86.53', 8080, '/', 1, 0, 'attempt-new');
+assert.equal(published?.attemptId, 'attempt-new');
+assert.equal(published?.publicUrl, 'https://demo.trycloudflare.com');
+
+globalThis.fetch = async () =>
+  new Response(
+    JSON.stringify({
+      success: true,
+      data: { ...route, publicUrl: 'http://demo.trycloudflare.com' },
+    }),
+    { status: 200 }
+  );
+assert.equal(
+  await client.publishRoute('demo', '100.70.86.53', 8080, '/', 1, 0, 'attempt-new'),
+  null,
+  'non-HTTPS gateway URLs are rejected'
+);
+
+globalThis.fetch = async (_url, options) => {
+  const request = JSON.parse(options.body);
+  assert.equal(request.routes[0].attemptId, 'attempt-new');
+  return new Response(JSON.stringify({ success: true, data: [route] }), { status: 200 });
+};
+const reconciled = await client.reconcileRoutes(
+  [{ deploymentId: 'demo', attemptId: 'attempt-new', upstreamIp: '100.70.86.53', upstreamPort: 8080 }],
+  1,
+  0
+);
+assert.equal(reconciled?.[0]?.attemptId, 'attempt-new');
+
+console.log('ok - gateway client validates route identity and HTTPS responses');

@@ -148,8 +148,11 @@ export async function reconcileGatewayRoutes(
 
   for (const route of desired) {
     const gatewayRoute = publishedById.get(route.deploymentId);
+    const attemptIsCurrent =
+      gatewayRoute !== undefined && (gatewayRoute.attemptId ?? null) === route.attemptId;
     const routeIsCurrent =
-      gatewayRoute &&
+      attemptIsCurrent &&
+      gatewayRoute !== undefined &&
       gatewayRoute.upstreamIp === route.upstreamIp &&
       gatewayRoute.upstreamPort === route.upstreamPort;
     const ready = Boolean(routeIsCurrent && gatewayRoute && isReadyPublishedRoute(gatewayRoute));
