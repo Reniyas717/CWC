@@ -51,12 +51,12 @@ recover a powered-off laptop or stopped WSL instance.
 
 ## Verification status
 
-The controlled API tests run with fake Caddy, tunnel and upstream adapters and
-cover authentication, validation, readiness, route replacement, removal,
-tunnel restart, reconciliation and stale-route clearing. This environment has
-not completed real Caddy or Quick Tunnel verification: `caddy` and
-`cloudflared` are not installed in Ubuntu/WSL, and installing system packages
-requires interactive sudo access. Before the demo, install both tools, run a
-local HTTP app through Caddy, then verify a second laptop with
+The controlled API tests use fake Caddy, tunnel and upstream adapters and cover
+authentication, validation, readiness, route replacement, removal, tunnel
+restart, reconciliation and stale-route clearing. This environment has not
+completed real Caddy or Quick Tunnel verification: `caddy` and `cloudflared`
+are not installed in Ubuntu/WSL, and installing system packages requires
+interactive sudo access. Before the demo, install both tools, run a local HTTP
+app through Caddy, then verify a second laptop with
 `curl http://<worker-tailscale-ip>:<assigned-port>/` and confirm the assigned
 port is bound to Tailscale/private interfaces rather than a public interface.
