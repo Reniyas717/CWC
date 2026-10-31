@@ -86,9 +86,9 @@ const tests = [
   { name: '6a. Workers STATUS without token', url: '/api/v1/workers/status', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
   { name: '6b. Workers STATUS with valid worker token and payload', url: '/api/v1/workers/status', method: 'POST', headers: { Authorization: 'Bearer ' + workerToken, 'Content-Type': 'application/json' }, body: JSON.stringify(sampleStatus), expectedStatus: 200 },
 
-  { name: '7a. Workers TASKS poll without token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '7b. Workers TASKS poll with wrong token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
-  { name: '7c. Workers TASKS poll with valid worker token', url: '/api/v1/workers/w1/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 200 },
+  { name: '7a. Workers TASKS poll without token', url: '/api/v1/workers/worker-auth-test-01/tasks', method: 'GET', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '7b. Workers TASKS poll with wrong token', url: '/api/v1/workers/worker-auth-test-01/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + wrongToken }, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },
+  { name: '7c. Workers TASKS poll with valid worker token', url: '/api/v1/workers/worker-auth-test-01/tasks', method: 'GET', headers: { Authorization: 'Bearer ' + workerToken }, expectedStatus: 200 },
 
   // Internal worker reporting endpoints
   { name: '8a. Internal result reporting without token', url: '/api/v1/internal/deployments/dep-nonexistent/result', method: 'POST', headers: {}, expectedStatus: 401, checkCode: 'UNAUTHORIZED' },

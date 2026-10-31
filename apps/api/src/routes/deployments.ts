@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { eq, desc, or, asc, and, gte } from 'drizzle-orm';
+import { eq, desc, asc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import {
@@ -15,8 +15,8 @@ import {
   deployments,
   deploymentLogs,
   deploymentEvents,
-  workerNodes,
 } from '../db/schema.js';
+import { selectBestWorker } from '../services/scheduler.js';
 
 export const deploymentsRouter: Router = Router();
 
@@ -159,28 +159,13 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
       }
     }
 
-    // 2. Worker Selection (MVP Assignment)
-    let assignedWorkerId = payload.workerId;
-
-    if (!assignedWorkerId) {
-      const activeHeartbeatCutoff = new Date(Date.now() - 30_000);
-      // Find candidate worker that is currently idle or busy with a valid heartbeat (<30s)
-      const eligibleWorkers = await db
-        .select()
-        .from(workerNodes)
-        .where(
-          and(
-            or(eq(workerNodes.state, 'idle'), eq(workerNodes.state, 'busy')),
-            gte(workerNodes.lastHeartbeatAt, activeHeartbeatCutoff)
-          )
-        )
-        .orderBy(asc(workerNodes.activeContainers))
-        .limit(1);
-
-      if (eligibleWorkers.length > 0) {
-        assignedWorkerId = eligibleWorkers[0].id;
-      }
-    }
+    // 2. Resource-Aware Worker Selection (Least-Loaded Placement)
+    const placement = await selectBestWorker(
+      payload.resourceLimits.memoryLimitMb,
+      payload.workerId
+    );
+    const assignedWorkerId = placement.worker ? placement.worker.id : null;
+    const placementScore = placement.score;
 
     // 3. Compute deployment version number
     const prevDeployments = await db
@@ -209,8 +194,8 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
       deploymentId,
       eventType: 'SCHEDULED',
       details: assignedWorkerId
-        ? `Queued and assigned to worker '${assignedWorkerId}'`
-        : 'Queued (awaiting worker availability)',
+        ? `Queued and assigned to least-loaded worker '${assignedWorkerId}' (Load Score: ${placementScore ?? 'N/A'})`
+        : `Queued (awaiting worker availability: ${placement.reason || 'no eligible worker'})`,
       timestamp: now,
     });
 
