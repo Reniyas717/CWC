@@ -55,6 +55,26 @@ response = await fetch(endpoint, { headers: { authorization: 'Bearer test-token'
 assert.equal(response.status, 200);
 assert.equal((await response.json()).data.publicUrl, published.data.publicUrl);
 
+response = await fetch(endpoint, { method: 'PUT', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' }, body: JSON.stringify({ upstreamIp: '100.70.86.53', upstreamPort: healthPort, healthPath: '/' }) });
+assert.equal(response.status, 201);
+const replaced = await response.json();
+assert.notEqual(replaced.data.publicUrl, published.data.publicUrl);
+assert.equal(tunnels[0].stopped, true);
+
+const tunnelStart = tunnel.start;
+let failNextTunnel = true;
+tunnel.start = async (port) => {
+  if (failNextTunnel) {
+    failNextTunnel = false;
+    throw new Error('simulated tunnel failure');
+  }
+  return tunnelStart(port);
+};
+response = await fetch(endpoint, { method: 'PUT', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' }, body: JSON.stringify({ upstreamIp: '100.70.86.53', upstreamPort: healthPort }) });
+assert.equal(response.status, 500);
+response = await fetch(endpoint, { headers: { authorization: 'Bearer test-token' } });
+assert.equal((await response.json()).data.publicUrl, replaced.data.publicUrl);
+
 response = await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token' } });
 assert.equal(response.status, 200);
 assert.equal(tunnels[0].stopped, true);
