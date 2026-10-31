@@ -11,10 +11,10 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'dev-admin-token-change-in-production';
 
 export class ApiRequestError extends Error {
-  readonly status: number;
+  readonly status?: number;
   readonly code?: string;
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status?: number, code?: string) {
     super(message);
     this.name = 'ApiRequestError';
     this.status = status;
@@ -77,21 +77,6 @@ export interface SweepResult {
   rescheduledDeployments: string[];
   failedDeployments: string[];
   timestamp: string;
-}
-
-/**
- * Error returned when the dashboard cannot create a deployment through the
- * control plane. Submission errors must reach the UI instead of being hidden
- * behind a locally fabricated running deployment.
- */
-export class ApiRequestError extends Error {
-  readonly status?: number;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = 'ApiRequestError';
-    this.status = status;
-  }
 }
 
 async function getApiErrorMessage(response: Response): Promise<string> {
