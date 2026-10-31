@@ -9,6 +9,7 @@ import { requireWorker } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
 import { deployments, deploymentLogs, deploymentEvents, workerNodes } from '../db/schema.js';
 import { gatewayClient } from '../services/gateway-client.js';
+import { removeDeploymentRoute } from '../services/route-cleanup.js';
 
 export const internalDeploymentsRouter: Router = Router();
 
@@ -241,7 +242,10 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
             id,
             upstreamIp.data,
             outcome.assignedPort!,
-            '/'
+            '/',
+            5,
+            1500,
+            outcome.attemptId ?? undefined
           );
 
           if (!published?.publicUrl) {
@@ -273,7 +277,11 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
           // newer running attempt.
           if (applied.length === 0) {
             const current = await db
-              .select({ state: deployments.state, workerId: deployments.workerId, attemptId: deployments.attemptId })
+              .select({
+                state: deployments.state,
+                workerId: deployments.workerId,
+                attemptId: deployments.attemptId,
+              })
               .from(deployments)
               .where(eq(deployments.id, id));
             const currentRow = current[0];
@@ -282,7 +290,7 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
               ((outcome.attemptId && currentRow.attemptId !== outcome.attemptId) ||
                 (!outcome.attemptId && currentRow.workerId !== targetWorkerId));
             if (!replacedByNewAttempt) {
-              await gatewayClient.removeRoute(id);
+              await gatewayClient.removeRoute(id, outcome.attemptId ?? undefined);
             }
           }
         } catch (gwErr) {
@@ -309,7 +317,19 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
         );
       });
     } else if (outcome.state === 'stopped' || outcome.state === 'failed') {
-      void gatewayClient.removeRoute(id);
+      // The gateway compares the attempt identity atomically before deleting
+      // its route, so a delayed terminal result cannot remove a newer route.
+      void removeDeploymentRoute({
+        deploymentId: id,
+        gatewayAttemptId: outcome.attemptId ?? undefined,
+        currentAttemptId: outcome.attemptId ?? null,
+        expectedState: outcome.state,
+      }).catch((cleanupError: unknown) => {
+        console.warn(
+          `[InternalDeployments] Route cleanup failed for ${id}:`,
+          cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        );
+      });
     }
   } catch (error) {
     res.status(500).json({

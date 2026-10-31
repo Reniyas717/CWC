@@ -2,6 +2,7 @@ import { env } from '../config/env.js';
 
 export interface PublishedRoute {
   deploymentId: string;
+  attemptId?: string;
   status: string;
   publicUrl?: string;
   listenerPort?: number;
@@ -30,7 +31,8 @@ export class GatewayClient {
     upstreamPort: number,
     healthPath = '/',
     maxAttempts = 5,
-    delayMs = 1500
+    delayMs = 1500,
+    attemptId?: string
   ): Promise<PublishedRoute | null> {
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -46,6 +48,7 @@ export class GatewayClient {
               upstreamIp,
               upstreamPort,
               healthPath,
+              ...(attemptId ? { attemptId } : {}),
             }),
             signal: AbortSignal.timeout(18000),
           }
@@ -95,36 +98,56 @@ export class GatewayClient {
   /**
    * Removes an ingress route and terminates any associated Cloudflare Quick Tunnel.
    */
-  async removeRoute(deploymentId: string): Promise<boolean> {
-    try {
-      const response = await fetch(
-        `${this.baseUrl}/v1/routes/${encodeURIComponent(deploymentId)}`,
-        {
+  async removeRoute(
+    deploymentId: string,
+    attemptId?: string,
+    maxAttempts = 3,
+    delayMs = 1000
+  ): Promise<boolean> {
+    const routeUrl = new URL(`${this.baseUrl}/v1/routes/${encodeURIComponent(deploymentId)}`);
+    if (attemptId) routeUrl.searchParams.set('attemptId', attemptId);
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await fetch(routeUrl, {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${this.token}`,
           },
           signal: AbortSignal.timeout(10000),
-        }
-      );
+        });
 
-      if (!response.ok && response.status !== 404) {
+        // A missing route is already in the desired state. The gateway also
+        // returns success when an attempt-guarded removal is superseded by a
+        // newer route, because the old route must not be touched.
+        if (response.ok || response.status === 404) {
+          console.log(`[GatewayClient] Route removed for ${deploymentId}`);
+          return true;
+        }
+
         const errorText = await response.text().catch(() => '');
+        if (attempt < maxAttempts && response.status >= 500) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
         console.warn(
           `[GatewayClient] Failed to remove route for ${deploymentId} (${response.status}): ${errorText}`
         );
         return false;
+      } catch (error) {
+        if (attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        console.warn(
+          `[GatewayClient] Unable to reach Gateway service at ${this.baseUrl} to remove route for ${deploymentId}:`,
+          error instanceof Error ? error.message : String(error)
+        );
+        return false;
       }
-
-      console.log(`[GatewayClient] Route removed for ${deploymentId}`);
-      return true;
-    } catch (error) {
-      console.warn(
-        `[GatewayClient] Unable to reach Gateway service at ${this.baseUrl} to remove route for ${deploymentId}:`,
-        error instanceof Error ? error.message : String(error)
-      );
-      return false;
     }
+
+    return false;
   }
 
   /**
