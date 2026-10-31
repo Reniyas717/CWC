@@ -13,6 +13,7 @@ import {
   Sparkles,
   Zap,
   Globe2,
+  ArrowRight,
 } from 'lucide-react';
 import { Deployment, WorkerNode, AppConfig } from '@cloud-without-clouds/shared';
 import { api, ClusterRebalanceResult } from '@/services/api';
@@ -285,68 +286,124 @@ export function EqualizerPage() {
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in-50 duration-200">
-      {/* Top Title & Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shadow-xs">
-              <Scale className="h-4 w-4" />
+    <div className="space-y-5 animate-in fade-in-50 duration-200">
+      {/* Sleek Unified Equalizer Control Header */}
+      <div className="space-y-3">
+        {/* Title, Status Badge & Primary Action Controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <div className="h-8 w-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shadow-xs shrink-0">
+                <Scale className="h-4 w-4" />
+              </div>
+              <h1
+                className="text-xl font-bold tracking-tight text-foreground"
+                style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
+              >
+                Cluster Resource Equalizer
+              </h1>
+              {clusterSummary.isBalanced ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Cluster Balanced
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Uneven Distribution ({clusterSummary.skew}% skew)
+                </span>
+              )}
             </div>
-            <h1
-              className="text-2xl font-bold tracking-tight text-foreground"
-              style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
-            >
-              Cluster Resource Equalizer
-            </h1>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+              Capacity-weighted balancing: 16 GB workstations carry heavier workloads so smaller laptops stay fast and cool.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-            Intelligently balance workloads across laptops and workstations based on their hardware
-            capacity.
-          </p>
+
+          {/* Action Controls */}
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              className="text-xs flex items-center gap-1.5 cursor-pointer h-8.5"
+              title="Sync device stats"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Sync</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => rebalanceMutation.mutate(true)}
+              disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+              className="text-xs cursor-pointer h-8.5"
+            >
+              Preview Plan
+            </Button>
+
+            <Button
+              size="sm"
+              onClick={() => rebalanceMutation.mutate(false)}
+              disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+              className="text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer h-8.5 px-3.5"
+            >
+              {rebalanceMutation.isPending ? (
+                <>
+                  <span className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                  <span>Balancing...</span>
+                </>
+              ) : (
+                <>
+                  <Scale className="h-3.5 w-3.5" />
+                  <span>Equalize Load Now</span>
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center gap-2 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            className="text-xs flex items-center gap-1.5 cursor-pointer"
-            title="Sync device stats"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            <span>Sync</span>
-          </Button>
+        {/* 1-Click Strategy Presets Bar */}
+        <div className="p-2.5 px-3.5 bg-secondary/30 rounded-xl border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
+            <Sparkles className="h-3.5 w-3.5 text-primary" />
+            <span>1-Click Balance Strategies:</span>
+          </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => rebalanceMutation.mutate(true)}
-            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
-            className="text-xs cursor-pointer"
-          >
-            Preview Rebalance
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyStrategy('balanced')}
+              disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+              className="text-xs h-7.5 px-2.5 flex items-center gap-1.5 cursor-pointer hover:bg-emerald-500/10 hover:border-emerald-500/30"
+            >
+              <Scale className="h-3 w-3 text-emerald-500" />
+              <span>Fair Capacity Share</span>
+            </Button>
 
-          <Button
-            size="sm"
-            onClick={() => rebalanceMutation.mutate(false)}
-            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
-            className="text-xs font-semibold flex items-center gap-1.5 shadow-xs cursor-pointer"
-          >
-            {rebalanceMutation.isPending ? (
-              <>
-                <span className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                <span>Balancing...</span>
-              </>
-            ) : (
-              <>
-                <Scale className="h-3.5 w-3.5" />
-                <span>Equalize Load Now</span>
-              </>
-            )}
-          </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyStrategy('desktop')}
+              disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+              className="text-xs h-7.5 px-2.5 flex items-center gap-1.5 cursor-pointer hover:bg-amber-500/10 hover:border-amber-500/30"
+            >
+              <Zap className="h-3 w-3 text-amber-500" />
+              <span>Desktop Priority</span>
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => applyStrategy('spread')}
+              disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
+              className="text-xs h-7.5 px-2.5 flex items-center gap-1.5 cursor-pointer hover:bg-sky-500/10 hover:border-sky-500/30"
+            >
+              <Globe2 className="h-3 w-3 text-sky-500" />
+              <span>Distributed Spread</span>
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -382,108 +439,6 @@ export function EqualizerPage() {
           </button>
         </div>
       )}
-
-      {/* Hero Overview Card: Plain-English Status */}
-      <Card className="border border-border shadow-xs bg-card overflow-hidden">
-        <CardContent className="p-5 sm:p-6">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="space-y-2 max-w-2xl">
-              <div className="flex items-center gap-2 flex-wrap">
-                {clusterSummary.isBalanced ? (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    Cluster Load is Fairly Balanced
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                    <AlertTriangle className="h-3.5 w-3.5" />
-                    Uneven Workload Distribution Detected
-                  </span>
-                )}
-                <span className="text-xs text-muted-foreground font-mono">
-                  {activeWorkers.length} online devices • {clusterSummary.totalClusterRamGb} GB total
-                  RAM
-                </span>
-              </div>
-
-              <h2
-                className="text-lg font-bold text-foreground"
-                style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
-              >
-                {clusterSummary.isBalanced
-                  ? 'All devices are carrying workloads proportional to their hardware power.'
-                  : 'Some devices are working harder than others. Equalizing will rebalance apps.'}
-              </h2>
-
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                A <strong>16 GB desktop</strong> can easily run multiple apps, while a{' '}
-                <strong>4 GB laptop</strong> should only run light tasks. Equalizing balances by{' '}
-                <strong>percentage of capacity</strong>, keeping small laptops cool while putting
-                idle workstations to work.
-              </p>
-            </div>
-
-            {/* Quick Balance Button on Hero */}
-            <div className="flex flex-col sm:flex-row lg:flex-col gap-2 shrink-0 justify-center">
-              <Button
-                size="default"
-                onClick={() => rebalanceMutation.mutate(false)}
-                disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
-                className="h-10 px-5 text-xs font-bold shadow-sm flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <Scale className="h-4 w-4" />
-                <span>Equalize Load Now</span>
-              </Button>
-              <p className="text-[11px] text-muted-foreground text-center">
-                1-click redistribution • Zero downtime
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Strategy Control Bar: Super Flexible Presets */}
-      <div className="p-3.5 bg-secondary/30 rounded-xl border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-foreground">
-          <Sparkles className="h-4 w-4 text-primary" />
-          <span>Quick Balance Strategies:</span>
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => applyStrategy('balanced')}
-            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
-            className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Scale className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Fair Capacity Share</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => applyStrategy('desktop')}
-            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
-            className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Zap className="h-3.5 w-3.5 text-amber-500" />
-            <span>Desktop Priority</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => applyStrategy('spread')}
-            disabled={rebalanceMutation.isPending || activeWorkers.length < 2}
-            className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
-          >
-            <Globe2 className="h-3.5 w-3.5 text-sky-500" />
-            <span>Distributed Spread</span>
-          </Button>
-        </div>
-      </div>
 
       {/* Connected Devices Grid (Clear, intuitive, beautiful) */}
       <div className="space-y-3">
@@ -524,81 +479,81 @@ export function EqualizerPage() {
               return (
                 <Card
                   key={device.worker.id}
-                  className={`flex flex-col justify-between transition-all border ${
+                  className={`flex flex-col justify-between transition-all border h-full ${
                     isBest
                       ? 'border-primary/40 bg-card shadow-xs ring-1 ring-primary/20'
                       : 'border-border bg-card'
                   }`}
                 >
-                  <CardContent className="p-5 space-y-4">
-                    {/* Device Header */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="h-9 w-9 rounded-xl bg-secondary flex items-center justify-center shrink-0">
-                          {device.totalRamMb >= 12000 ? (
-                            <Server className="h-4.5 w-4.5 text-foreground" />
-                          ) : (
-                            <Laptop className="h-4.5 w-4.5 text-foreground" />
-                          )}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-sm text-foreground truncate">
+                  <CardContent className="p-4 sm:p-5 flex-1 flex flex-col justify-between space-y-4">
+                    <div className="space-y-3.5">
+                      {/* Device Header */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                          <div className="h-9 w-9 rounded-xl bg-secondary flex items-center justify-center shrink-0">
+                            {device.totalRamMb >= 12000 ? (
+                              <Server className="h-4.5 w-4.5 text-foreground" />
+                            ) : (
+                              <Laptop className="h-4.5 w-4.5 text-foreground" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="font-bold text-sm text-foreground truncate" title={device.worker.name}>
                               {device.worker.name}
                             </h3>
+                            <p className="text-[11px] font-mono text-muted-foreground">
+                              {device.worker.ipAddress}
+                            </p>
                           </div>
-                          <p className="text-[11px] font-mono text-muted-foreground">
-                            {device.worker.ipAddress}
-                          </p>
+                        </div>
+
+                        {/* Specs Badge */}
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border shrink-0 whitespace-nowrap">
+                          {device.totalRamGb} GB RAM
+                        </span>
+                      </div>
+
+                      {/* Load Gauge (Clear progress bar) */}
+                      <div className="p-3 rounded-xl bg-secondary/30 border border-border space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-foreground">Hardware Load</span>
+                          <span className="font-mono font-bold text-foreground">
+                            {device.loadPercentage}%
+                          </span>
+                        </div>
+
+                        <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              isHeavy
+                                ? 'bg-amber-500'
+                                : device.loadPercentage > 0
+                                ? 'bg-emerald-500'
+                                : 'bg-muted-foreground/30'
+                            }`}
+                            style={{ width: `${Math.max(device.loadPercentage, 4)}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                          <span>{device.freeRamGb} GB free RAM</span>
+                          <span>
+                            {device.deployments.length} / {device.maxWorkloads} app slots
+                          </span>
                         </div>
                       </div>
 
-                      {/* Specs Badge */}
-                      <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-secondary text-foreground border border-border shrink-0">
-                        {device.totalRamGb} GB RAM
-                      </span>
+                      {/* Best Target Tag */}
+                      {isBest && (
+                        <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium flex items-center gap-1.5">
+                          <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                          <span>Recommended target for new workloads (most headroom).</span>
+                        </div>
+                      )}
                     </div>
-
-                    {/* Load Gauge (Clear progress bar) */}
-                    <div className="p-3 rounded-xl bg-secondary/30 border border-border space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-medium text-foreground">Hardware Load</span>
-                        <span className="font-mono font-bold text-foreground">
-                          {device.loadPercentage}%
-                        </span>
-                      </div>
-
-                      <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            isHeavy
-                              ? 'bg-amber-500'
-                              : device.loadPercentage > 0
-                              ? 'bg-emerald-500'
-                              : 'bg-muted-foreground/30'
-                          }`}
-                          style={{ width: `${Math.max(device.loadPercentage, 4)}%` }}
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>{device.freeRamGb} GB free RAM</span>
-                        <span>
-                          {device.deployments.length} / {device.maxWorkloads} app slots
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Best Target Tag */}
-                    {isBest && (
-                      <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-medium flex items-center gap-1.5">
-                        <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                        <span>Recommended target for new workloads (most headroom).</span>
-                      </div>
-                    )}
 
                     {/* Apps Running on this Device */}
-                    <div className="space-y-2 pt-1 border-t border-border">
+                    <div className="space-y-2 pt-2 border-t border-border mt-auto">
                       <span className="text-[11px] font-semibold text-muted-foreground block">
                         Workloads on this machine ({device.deployments.length}):
                       </span>
@@ -615,7 +570,7 @@ export function EqualizerPage() {
                               className="p-3 rounded-lg border border-border bg-card/80 space-y-2 text-xs"
                             >
                               <div className="flex items-center justify-between gap-2">
-                                <div className="min-w-0">
+                                <div className="min-w-0 flex-1">
                                   <p className="font-mono font-bold text-foreground truncate text-xs">
                                     {dep.applicationId}
                                   </p>
@@ -627,20 +582,20 @@ export function EqualizerPage() {
 
                                 <Button
                                   size="sm"
-                                  variant="ghost"
+                                  variant="outline"
                                   onClick={() => setSelectedRelocateDep(dep)}
-                                  className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1"
-                                  title="Open detailed custom relocation modal"
+                                  className="h-6.5 px-2 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1 shrink-0"
+                                  title="Open manual relocation modal"
                                 >
                                   <SlidersHorizontal className="h-3 w-3" />
-                                  <span>Details</span>
+                                  <span>Relocate</span>
                                 </Button>
                               </div>
 
                               {/* Direct 1-Click Quick Move Chips */}
                               <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-border/60">
-                                <span className="text-[10px] text-muted-foreground font-mono">
-                                  Quick shift:
+                                <span className="text-[10px] text-muted-foreground font-mono shrink-0">
+                                  Shift to:
                                 </span>
                                 {activeWorkers
                                   .filter((other) => other.id !== device.worker.id)
@@ -648,7 +603,14 @@ export function EqualizerPage() {
                                     const otherGb = (
                                       (other.resources?.totalMemoryMb ?? 8192) / 1024
                                     ).toFixed(0);
-                                    const shortName = other.name.split(' ')[0];
+                                    const shortName = other.name.includes('Alpha')
+                                      ? 'Alpha'
+                                      : other.name.includes('Beta')
+                                      ? 'Beta'
+                                      : other.name.includes('Gamma')
+                                      ? 'Gamma'
+                                      : other.name.split(' ')[0];
+
                                     return (
                                       <button
                                         key={other.id}
@@ -665,7 +627,8 @@ export function EqualizerPage() {
                                         className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-secondary hover:bg-primary hover:text-primary-foreground border border-border transition-colors cursor-pointer flex items-center gap-1"
                                         title={`Instantly shift ${dep.applicationId} to ${other.name}`}
                                       >
-                                        <span>→ {shortName}</span>
+                                        <ArrowRight className="h-2.5 w-2.5 opacity-70" />
+                                        <span>{shortName}</span>
                                         <span className="opacity-60 text-[9px]">({otherGb}G)</span>
                                       </button>
                                     );
