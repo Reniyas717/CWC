@@ -108,3 +108,64 @@ During Phase 1 setup and testing, the following host and cross-platform issues w
   - `docker compose ps` shows `cwc-postgres` and `cwc-redis` in `healthy` state.
   - Executed `pnpm db:migrate` successfully creating all 6 tables.
   - Verified `GET /health` returning `"status": "ok"` with `"database": { "status": "ok", "message": "PostgreSQL connected" }`.
+
+
+---
+
+# Changes & Implementation Log: Phase 2 — Auth Middleware & Environment Validation
+
+## 1. Overview & Objectives
+
+In **Phase 2**, we implemented endpoint protection and secret management for the Control Plane API (`apps/api`) in strict alignment with Section 4.1 of `AGENTS.md` and Section 13.1 of `ARCHITECTURE.md`.
+
+---
+
+## 2. Environment Schema Updates (`apps/api/src/config/env.ts`)
+
+Added strict validation for two pre-shared bearer tokens via Zod:
+- **`ADMIN_TOKEN`**: Shared secret required for user/admin mutating operations (e.g. creating/cancelling deployments). Defaulted to `dev-admin-token-change-in-production` for frictionless local development.
+- **`WORKER_SECRET_TOKEN`**: Shared secret required for worker-to-control-plane communication (e.g. registration, heartbeat, task polling, container status reporting). Defaulted to `dev-worker-secret-token-change-in-production`.
+
+---
+
+## 3. Auth Middlewares (`apps/api/src/middlewares/auth.ts`)
+
+Created three reusable Express middlewares:
+1. **`requireAdmin`**:
+   - Inspects `Authorization: Bearer <ADMIN_TOKEN>` header.
+   - If invalid or missing, immediately halts the request and returns a structured `401 Unauthorized` response with code `UNAUTHORIZED`.
+   - On success, attaches default admin identity (`req.user = { id: 'admin', role: 'admin' }`) and calls `next()`.
+2. **`requireWorker`**:
+   - Inspects `Authorization: Bearer <WORKER_SECRET_TOKEN>` header.
+   - Rejects unauthorized callers with `401 Unauthorized`.
+   - Used to guard worker node operational endpoints.
+3. **`optionalAdmin`**:
+   - Permissive in `development` and `test` environments to allow unauthenticated read-only inspection (e.g. listing deployments and worker nodes).
+   - If a token is provided in development, verifies validity.
+   - In `production`, strictly requires authorization.
+
+---
+
+## 4. Protected Routes Integration
+
+Updated route handlers to apply auth guards:
+- **`apps/api/src/routes/workers.ts`**:
+  - `POST /register`: Guarded by `requireWorker`.
+  - `POST /heartbeat`: Guarded by `requireWorker`.
+  - `POST /status`: Guarded by `requireWorker`.
+  - `GET /:id/tasks`: Guarded by `requireWorker`.
+  - `GET /`: Guarded by `optionalAdmin`.
+- **`apps/api/src/routes/deployments.ts`**:
+  - `POST /`: Guarded by `requireAdmin`.
+  - `POST /:id/cancel`: Guarded by `requireAdmin`.
+  - `GET /`, `GET /:id`, `GET /:id/logs`: Guarded by `optionalAdmin`.
+- **`apps/api/src/routes/health.ts`**:
+  - Remains public and unauthenticated (`GET /health`).
+
+---
+
+## 5. Verification & Quality Assurance
+
+- **Type Checking**: Passed `pnpm check-types` across all packages with 0 errors.
+- **Linting**: Passed `pnpm lint` across the monorepo with 0 ESLint errors.
+- **Build**: Successfully compiled using `pnpm --filter @cloud-without-clouds/api build`.

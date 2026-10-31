@@ -22,6 +22,8 @@ const EnvSchema = z.object({
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().int().default(6379),
   REDIS_PASSWORD: z.string().optional(),
+  ADMIN_TOKEN: z.string().min(8).default('dev-admin-token-change-in-production'),
+  WORKER_SECRET_TOKEN: z.string().min(8).default('dev-worker-secret-token-change-in-production'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
