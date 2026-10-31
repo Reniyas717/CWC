@@ -20,7 +20,7 @@ export function AppLayout() {
               <Cloud className="h-5 w-5" />
             </div>
             <div>
-              <span className="font-bold text-base tracking-tight text-slate-900 dark:text-white block">
+              <span className="font-heading font-bold text-base tracking-tight text-slate-900 dark:text-white block">
                 Cloud Without Clouds
               </span>
               <span className="text-[11px] text-slate-500 font-medium block">
