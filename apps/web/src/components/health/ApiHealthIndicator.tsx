@@ -24,97 +24,93 @@ export function ApiHealthIndicator() {
   });
 
   return (
-    <Card className="border border-gray-200 dark:border-gray-800 shadow-sm">
-      <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <div className="space-y-1">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Server className="h-4 w-4 text-blue-500" />
-            Control Plane API Status
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Live health verification against{' '}
-            <code className="text-blue-600 dark:text-blue-400 font-mono">{API_URL}/health</code>
-          </CardDescription>
-        </div>
+    <Card>
+      <CardHeader className="p-5 pb-3">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-1">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+              <Server className="h-4 w-4 text-muted-foreground" />
+              Control Plane API Status
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Live health verification against{' '}
+              <code className="text-foreground font-mono text-[11px] bg-secondary px-1.5 py-0.5 rounded">{API_URL}/health</code>
+            </CardDescription>
+          </div>
 
-        <div className="flex items-center gap-2">
-          {isLoading ? (
-            <Badge variant="secondary" className="flex items-center gap-1">
-              <RefreshCw className="h-3 w-3 animate-spin text-gray-500" />
-              Checking...
-            </Badge>
-          ) : data?.status === 'ok' ? (
-            <Badge
-              variant="success"
-              className="flex items-center gap-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800"
+          <div className="flex items-center gap-2 shrink-0">
+            {isLoading ? (
+              <Badge variant="secondary" className="flex items-center gap-1.5">
+                <RefreshCw className="h-3 w-3 animate-spin" />
+                Checking
+              </Badge>
+            ) : data?.status === 'ok' ? (
+              <Badge variant="success" className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Online
+              </Badge>
+            ) : (
+              <Badge variant="destructive" className="flex items-center gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Unreachable
+              </Badge>
+            )}
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              title="Refresh API Health"
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Online
-            </Badge>
-          ) : (
-            <Badge variant="destructive" className="flex items-center gap-1">
-              <AlertCircle className="h-3.5 w-3.5" />
-              Unreachable
-            </Badge>
-          )}
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            title="Refresh API Health"
-          >
-            <RefreshCw className={`h-4 w-4 text-gray-500 ${isFetching ? 'animate-spin' : ''}`} />
-          </Button>
+              <RefreshCw className={`h-3.5 w-3.5 text-muted-foreground ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
       </CardHeader>
 
-      <CardContent className="text-xs space-y-3">
+      <CardContent className="px-5 pb-5 space-y-4">
         {data ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg border border-gray-100 dark:border-gray-800">
-            <div>
-              <span className="text-gray-500 block">Service</span>
-              <span className="font-medium text-gray-900 dark:text-gray-100 truncate block">
-                {data.service}
-              </span>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 bg-secondary/30 p-4 rounded-lg border border-border">
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Service</span>
+              <span className="text-xs font-medium text-foreground truncate block">{data.service}</span>
             </div>
-            <div>
-              <span className="text-gray-500 block">Version</span>
-              <span className="font-mono text-gray-900 dark:text-gray-100">v{data.version}</span>
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Version</span>
+              <span className="text-xs font-mono text-foreground">v{data.version}</span>
             </div>
-            <div>
-              <span className="text-gray-500 block">Uptime</span>
-              <span className="font-mono text-gray-900 dark:text-gray-100">{data.uptime}s</span>
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Uptime</span>
+              <span className="text-xs font-mono text-foreground">{data.uptime}s</span>
             </div>
-            <div>
-              <span className="text-gray-500 block">Environment</span>
-              <span className="capitalize text-gray-900 dark:text-gray-100">
-                {data.environment}
-              </span>
+            <div className="space-y-1">
+              <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Environment</span>
+              <span className="text-xs capitalize text-foreground">{data.environment}</span>
             </div>
           </div>
         ) : error ? (
-          <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-lg text-red-700 dark:text-red-400 flex items-start gap-2">
+          <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive flex items-start gap-3">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold">Unable to connect to Control Plane API</p>
-              <p className="text-[11px] mt-0.5">
-                Make sure the API server is running on <code className="font-mono">{API_URL}</code>.
+            <div className="space-y-1">
+              <p className="text-xs font-semibold">Unable to connect to Control Plane API</p>
+              <p className="text-[11px] opacity-80">
+                Ensure the backend API server is running on{' '}
+                <code className="font-mono">{API_URL}</code>.
               </p>
             </div>
           </div>
         ) : null}
 
-        <div className="flex items-center justify-between text-[11px] text-gray-500 pt-1 border-t border-gray-100 dark:border-gray-800">
-          <span className="flex items-center gap-1">
-            <Activity className="h-3 w-3 text-blue-500" />
-            Automatic heartbeat sync every 10s
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground border-t border-border pt-3">
+          <span className="flex items-center gap-1.5">
+            <Activity className="h-3 w-3" />
+            Heartbeat polling every 10s
           </span>
-          <span>
+          <span className="font-mono">
             {data
-              ? `Checked: ${new Date(data.timestamp).toLocaleTimeString()}`
-              : 'Awaiting heartbeat...'}
+              ? `Last checked ${new Date(data.timestamp).toLocaleTimeString()}`
+              : 'Awaiting first heartbeat'}
           </span>
         </div>
       </CardContent>
