@@ -10,7 +10,6 @@ import {
   Server,
   Clock,
   Container,
-  ShieldCheck,
   CheckCircle2,
   RefreshCw,
   SlidersHorizontal,
@@ -23,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DataError } from '@/components/ui/data-error';
 
 function WorkerStatusBadge({ state }: { state: WorkerNode['state'] }) {
   if (state === 'idle') {
@@ -70,13 +70,19 @@ export function WorkersPage() {
   const queryClient = useQueryClient();
   const [sweepFeedback, setSweepFeedback] = React.useState<SweepResult | null>(null);
 
-  const { data: workers = [], isLoading } = useQuery<WorkerNode[]>({
+  const {
+    data: workers = [],
+    isLoading,
+    isError: isWorkersError,
+    error: workersError,
+    refetch: refetchWorkers,
+  } = useQuery<WorkerNode[]>({
     queryKey: ['workers'],
     queryFn: () => api.getWorkers(),
     refetchInterval: 5000,
   });
 
-  const { data: scores = [] } = useQuery<WorkerScoreBreakdown[]>({
+  const { data: scores = [], isError: isScoresError, error: scoresError } = useQuery<WorkerScoreBreakdown[]>({
     queryKey: ['worker-scores'],
     queryFn: () => api.getWorkerScores(512),
     refetchInterval: 5000,
@@ -163,6 +169,16 @@ export function WorkersPage() {
         </div>
       )}
 
+      {isWorkersError ? (
+        <DataError error={workersError} onRetry={() => void refetchWorkers()} />
+      ) : isScoresError ? (
+        <DataError title="Unable to load scheduler scores" error={scoresError} />
+      ) : null}
+
+      {sweepMutation.isError && (
+        <DataError title="Cluster sweep failed" error={sweepMutation.error} />
+      )}
+
       {/* Summary Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -230,15 +246,20 @@ export function WorkersPage() {
             </Card>
           ))}
         </div>
-      ) : workers.length === 0 ? (
-        <Card className="p-12 text-center">
-          <Server className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-          <h3 className="text-base font-semibold text-foreground mb-1">No Worker Nodes Found</h3>
-          <p className="text-sm text-muted-foreground max-w-md mx-auto mb-4">
-            Start a worker node on your workstation using `pnpm dev:worker` to register it with the control plane.
-          </p>
-          <div className="inline-block p-3 bg-secondary rounded-md font-mono text-xs text-left">
-            $ pnpm --filter @cloud-without-clouds/worker dev
+      ) : isWorkersError ? null : workers.length === 0 ? (
+        <Card className="border border-dashed border-border p-10 text-center">
+          <div className="max-w-sm mx-auto space-y-3">
+            <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mx-auto">
+              <Server className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-sm font-medium text-foreground">No Workers Registered</p>
+            <p className="text-xs text-muted-foreground">
+              Run{' '}
+              <code className="font-mono bg-secondary px-1.5 py-0.5 rounded text-foreground">
+                pnpm dev:worker
+              </code>{' '}
+              on a workstation to link it across the Tailscale mesh.
+            </p>
           </div>
         </Card>
       ) : (
@@ -252,6 +273,7 @@ export function WorkersPage() {
             const secondsAgo = Math.floor((Date.now() - lastHeartbeat) / 1000);
             const isFresh = secondsAgo < 15 && worker.state !== 'offline';
             const isWarning = secondsAgo >= 15 && secondsAgo < 30 && worker.state !== 'offline';
+            const leaseStatus = worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
 
             return (
               <Card key={worker.id} className="transition-all hover:border-foreground/20">
@@ -368,7 +390,7 @@ export function WorkersPage() {
                         </span>
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground">
-                        Heartbeat lease: active in Redis
+                        Heartbeat lease: {leaseStatus}
                       </div>
                     </div>
                   )}

@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { DataError } from '@/components/ui/data-error';
 
 function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
   if (state === 'running') {
@@ -66,6 +67,31 @@ function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
   );
 }
 
+function RoutingStatusBadge({ deployment }: { deployment: Deployment }) {
+  if (deployment.routingStatus === 'ready' && deployment.publicUrl) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        Public route ready
+      </span>
+    );
+  }
+  if (deployment.routingStatus === 'failed') {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-destructive">
+        <AlertCircle className="h-3 w-3" />
+        Route failed{deployment.routingError ? `: ${deployment.routingError}` : ''}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+      <Loader className="h-3 w-3 animate-spin" />
+      Publishing public route…
+    </span>
+  );
+}
+
 function timeAgo(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(ms / 60000);
@@ -80,7 +106,13 @@ export function DeploymentsPage() {
   const queryClient = useQueryClient();
   const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
 
-  const { data: deployments = [], isLoading } = useQuery<Deployment[]>({
+  const {
+    data: deployments = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
@@ -95,7 +127,9 @@ export function DeploymentsPage() {
 
   const runningCount = deployments.filter((d) => d.state === 'running').length;
   const failedCount = deployments.filter((d) => d.state === 'failed').length;
-  const activeIngressCount = deployments.filter((d) => d.state === 'running' && !!d.publicUrl).length;
+  const activeIngressCount = deployments.filter(
+    (d) => d.state === 'running' && d.routingStatus === 'ready' && !!d.publicUrl
+  ).length;
 
   return (
     <div className="space-y-8">
@@ -111,6 +145,12 @@ export function DeploymentsPage() {
           Live build logs, worker container lifecycle, and dynamic edge route assignments.
         </p>
       </div>
+
+      {isError && <DataError error={error} onRetry={() => void refetch()} />}
+
+      {cancelMutation.isError && (
+        <DataError title="Deployment cancellation failed" error={cancelMutation.error} />
+      )}
 
       {/* Summary Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -155,7 +195,7 @@ export function DeploymentsPage() {
             </Card>
           ))}
         </div>
-      ) : deployments.length === 0 ? (
+      ) : isError ? null : deployments.length === 0 ? (
         <Card className="border border-dashed border-border p-10 text-center">
           <div className="max-w-sm mx-auto space-y-3">
             <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mx-auto">
@@ -163,7 +203,8 @@ export function DeploymentsPage() {
             </div>
             <p className="text-sm font-medium text-foreground">No Deployments Found</p>
             <p className="text-xs text-muted-foreground">
-              Queue a deployment from the Applications page to trigger least-loaded placement across peer nodes.
+              Queue a deployment from the Applications page to trigger least-loaded placement across
+              peer nodes.
             </p>
           </div>
         </Card>
@@ -191,7 +232,9 @@ export function DeploymentsPage() {
                         <GitBranch className="h-3 w-3" />
                         <span>{dep.gitBranch}</span>
                         <span>@</span>
-                        <span className="bg-secondary px-1.5 py-0.2 rounded">{dep.gitCommitHash || 'head'}</span>
+                        <span className="bg-secondary px-1.5 py-0.2 rounded">
+                          {dep.gitCommitHash || 'head'}
+                        </span>
                         <span>•</span>
                         <span>v{dep.version}</span>
                         <span>•</span>
@@ -209,40 +252,45 @@ export function DeploymentsPage() {
                       <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
                         Target Worker
                       </span>
-                      <p className="font-mono text-foreground truncate">{dep.workerId ?? 'Auto-selecting...'}</p>
+                      <p className="font-mono text-foreground truncate">
+                        {dep.workerId ?? 'Auto-selecting...'}
+                      </p>
                     </div>
                     <div className="space-y-0.5">
                       <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
                         Container ID
                       </span>
-                      <p className="font-mono text-foreground truncate">{dep.containerId ?? 'Pending runtime...'}</p>
+                      <p className="font-mono text-foreground truncate">
+                        {dep.containerId ?? 'Pending runtime...'}
+                      </p>
                     </div>
                     <div className="space-y-0.5">
                       <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
                         Assigned Host Port
                       </span>
-                      <p className="font-mono text-foreground">{dep.assignedPort ? `:${dep.assignedPort}` : 'Ephemeral (-p 0:port)'}</p>
+                      <p className="font-mono text-foreground">
+                        {dep.assignedPort ? `:${dep.assignedPort}` : 'Ephemeral (-p 0:port)'}
+                      </p>
                     </div>
                   </div>
 
                   {/* Public URL and Row Actions */}
                   <div className="pt-3 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    {dep.publicUrl ? (
-                      <a
-                        href={dep.publicUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs font-mono text-foreground hover:underline"
-                      >
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span>{dep.publicUrl}</span>
-                        <ExternalLink className="h-3 w-3 opacity-60" />
-                      </a>
-                    ) : (
-                      <span className="text-[11px] font-mono text-muted-foreground">
-                        Ingress route: awaiting container health check (200 OK)
-                      </span>
-                    )}
+                    <div className="space-y-1 min-w-0">
+                      {dep.routingStatus === 'ready' && dep.publicUrl ? (
+                        <a
+                          href={dep.publicUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-mono text-foreground hover:underline"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span>{dep.publicUrl}</span>
+                          <ExternalLink className="h-3 w-3 opacity-60" />
+                        </a>
+                      ) : null}
+                      <RoutingStatusBadge deployment={dep} />
+                    </div>
 
                     {/* Action Buttons: View Logs & Cancel */}
                     <div className="flex items-center gap-2 ml-auto">

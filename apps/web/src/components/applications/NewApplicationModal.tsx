@@ -350,9 +350,9 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
 
                   {slug && (
                     <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2 py-1 rounded bg-secondary/40 border border-border">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground shrink-0" />
                       <span className="truncate">
-                        Route: <span className="text-foreground">https://{slug}.trycloudflare.com</span>
+                        Public route: <span className="text-foreground">assigned after the deployment is healthy</span>
                       </span>
                     </div>
                   )}

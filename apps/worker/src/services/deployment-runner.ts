@@ -10,6 +10,7 @@ import { ControlPlaneClient } from './control-plane-client.js';
 import { DockerEngine } from './docker-engine.js';
 import { GitRunner } from './git-runner.js';
 import { MetricsService } from './metrics.js';
+import { discoverTailscaleAddress } from './tailscale-address.js';
 
 const logger = createLogger('DeploymentRunner');
 
@@ -19,6 +20,7 @@ export class DeploymentRunner {
   private controlPlaneClient: ControlPlaneClient;
   private metricsService: MetricsService;
   private activeDeployments: Set<string> = new Set();
+  private activeAttemptIds: Map<string, string | undefined> = new Map();
   private inProgressControllers: Map<string, AbortController> = new Map();
 
   constructor(
@@ -57,6 +59,7 @@ export class DeploymentRunner {
 
     const abortController = new AbortController();
     this.activeDeployments.add(deploymentId);
+    this.activeAttemptIds.set(deploymentId, task.attemptId);
     this.inProgressControllers.set(deploymentId, abortController);
     this.metricsService.registerWorkload(deploymentId);
 
@@ -127,6 +130,12 @@ export class DeploymentRunner {
       addLog(`Docker image ${imageTag} build complete`, 'system', 'info');
 
       // Step 3: Run container with enforced caps & dynamic ephemeral port
+      const tailscaleAddress = discoverTailscaleAddress();
+      addLog(
+        `Publishing the application only on worker Tailscale address ${tailscaleAddress}...`,
+        'system',
+        'info'
+      );
       addLog(
         `Starting container with memory: ${task.resourceLimits.memoryLimitMb}MB, cpus: ${task.resourceLimits.cpuLimitCores}...`,
         'system',
@@ -135,6 +144,7 @@ export class DeploymentRunner {
       const runResult = await this.dockerEngine.runContainer({
         deploymentId,
         imageTag,
+        hostIp: tailscaleAddress,
         targetPort: task.targetPort,
         memoryLimitMb: task.resourceLimits.memoryLimitMb,
         cpuLimitCores: task.resourceLimits.cpuLimitCores,
@@ -158,6 +168,7 @@ export class DeploymentRunner {
       const resultPayload: DeploymentResultPayload = {
         deploymentId,
         workerId: workerConfig.WORKER_ID,
+        attemptId: task.attemptId,
         state: 'running',
         containerId: runResult.containerId,
         assignedPort: runResult.assignedPort,
@@ -167,8 +178,22 @@ export class DeploymentRunner {
         errorMessage: null,
       };
 
-      // Report result and flush logs to Control Plane
-      await this.controlPlaneClient.reportResult(resultPayload);
+      // Report result and flush logs to Control Plane. A 409 means this
+      // worker lost the assignment while it was building or starting. The
+      // container is already running at this point, so remove it before
+      // returning; otherwise a reconnecting/stale worker can orphan work on
+      // the host even though the control plane rejected the result.
+      const reportResponse = await this.controlPlaneClient.reportResult(resultPayload);
+      if (!reportResponse.ok) {
+        await this.dockerEngine.forceRemoveContainer(runResult.containerId);
+        this.dockerEngine.unregisterActiveContainer(deploymentId);
+        this.metricsService.unregisterWorkload(deploymentId);
+        throw new Error(
+          reportResponse.statusCode === 409
+            ? 'Control plane rejected this deployment result as stale; running container was removed'
+            : `Control plane rejected deployment result (${reportResponse.statusCode}): ${reportResponse.error || 'unknown error'}`
+        );
+      }
       await this.controlPlaneClient.sendLogs({ deploymentId, logs: allLogs });
 
       logger.info(
@@ -200,6 +225,7 @@ export class DeploymentRunner {
       const failedResult: DeploymentResultPayload = {
         deploymentId,
         workerId: workerConfig.WORKER_ID,
+        attemptId: task.attemptId,
         state: isAbort ? 'stopped' : 'failed',
         gitCommitHash: commitSha ?? undefined,
         imageTag: imageTag ?? undefined,
@@ -217,6 +243,7 @@ export class DeploymentRunner {
     } finally {
       this.inProgressControllers.delete(deploymentId);
       this.activeDeployments.delete(deploymentId);
+      this.activeAttemptIds.delete(deploymentId);
     }
   }
 
@@ -243,6 +270,7 @@ export class DeploymentRunner {
       await this.controlPlaneClient.reportResult({
         deploymentId,
         workerId: workerConfig.WORKER_ID,
+        attemptId: this.activeAttemptIds.get(deploymentId),
         state: 'stopped',
       });
     } catch {

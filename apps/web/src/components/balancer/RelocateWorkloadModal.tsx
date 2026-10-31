@@ -3,11 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeftRight,
   X,
-  Server,
-  HardDrive,
-  CheckCircle2,
   AlertCircle,
-  Laptop,
   Check,
 } from 'lucide-react';
 import { Deployment, WorkerNode } from '@cloud-without-clouds/shared';
@@ -118,8 +114,6 @@ export function RelocateWorkloadModal({
     setErrorMessage(null);
     relocateMutation.mutate({ depId: deployment.id, targetId: selectedTargetId });
   };
-
-  const selectedCandidate = candidateWorkers.find((c) => c.worker.id === selectedTargetId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-xs no-scrollbar overflow-y-auto">

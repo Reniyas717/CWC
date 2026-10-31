@@ -4,22 +4,16 @@ import {
   Scale,
   ArrowLeftRight,
   RefreshCw,
-  HardDrive,
-  Cpu,
   Server,
   CheckCircle2,
   AlertTriangle,
   Info,
-  Container,
-  ArrowRight,
   ShieldCheck,
   Laptop,
-  Layers,
-  Sparkles,
 } from 'lucide-react';
 import { Deployment, WorkerNode } from '@cloud-without-clouds/shared';
 import { api, ClusterRebalanceResult } from '@/services/api';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { RelocateWorkloadModal } from '@/components/balancer/RelocateWorkloadModal';
@@ -27,7 +21,7 @@ import { RelocateWorkloadModal } from '@/components/balancer/RelocateWorkloadMod
 export function EqualizerPage() {
   const queryClient = useQueryClient();
   const [selectedRelocateDep, setSelectedRelocateDep] = React.useState<Deployment | null>(null);
-  const [rebalancePlan, setRebalancePlan] = React.useState<ClusterRebalanceResult | null>(null);
+  const [, setRebalancePlan] = React.useState<ClusterRebalanceResult | null>(null);
   const [notification, setNotification] = React.useState<{
     type: 'success' | 'info' | 'error';
     title: string;

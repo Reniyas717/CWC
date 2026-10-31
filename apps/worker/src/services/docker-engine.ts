@@ -2,7 +2,7 @@ import { execFile } from 'child_process';
 import fsSync from 'fs';
 import path from 'path';
 import { promisify } from 'util';
-import { DeploymentLogEntry } from '@cloud-without-clouds/shared';
+import { DeploymentLogEntry, TailscaleIpv4Schema } from '@cloud-without-clouds/shared';
 import { createLogger } from '../logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -26,6 +26,8 @@ export interface DockerBuildResult {
 export interface DockerRunOptions {
   deploymentId: string;
   imageTag: string;
+  /** Validated Tailscale IPv4 address on the worker host. */
+  hostIp: string;
   targetPort: number;
   memoryLimitMb?: number;
   cpuLimitCores?: number;
@@ -46,6 +48,38 @@ export interface DockerRunResult {
   publicUrl: string;
   resourceCaps: DockerResourceCaps;
   logs: DeploymentLogEntry[];
+}
+
+export interface DockerPortBinding {
+  hostIp: string;
+  hostPort: number;
+}
+
+/**
+ * Docker must publish app ports on the worker's Tailscale interface only.
+ * Wildcard and IPv6 bindings are deliberately rejected because they do not
+ * prove that the app is private to the worker mesh.
+ */
+export function validatePrivateDockerBinding(
+  binding: DockerPortBinding,
+  expectedHostIp: string
+): DockerPortBinding {
+  if (binding.hostIp !== expectedHostIp) {
+    throw new Error(
+      `Docker published the app on ${binding.hostIp || '<empty host>'} instead of the worker Tailscale address ${expectedHostIp}. ` +
+        'Private routing is unavailable; this commonly indicates an incompatible Windows/WSL Docker Desktop network.'
+    );
+  }
+
+  if (!Number.isInteger(binding.hostPort) || binding.hostPort <= 0 || binding.hostPort > 65535) {
+    throw new Error(`Docker returned an invalid private host port: ${binding.hostPort}`);
+  }
+
+  return binding;
+}
+
+export function createPrivateDockerPortSpec(hostIp: string, targetPort: number): string {
+  return `${hostIp}:0:${targetPort}`;
 }
 
 export class DockerEngine {
@@ -165,12 +199,20 @@ export class DockerEngine {
     const {
       deploymentId,
       imageTag,
+      hostIp,
       targetPort,
       memoryLimitMb = 512,
       cpuLimitCores = 1.0,
       env = [],
       healthCheckPath,
     } = options;
+
+    const parsedHostIp = TailscaleIpv4Schema.safeParse(hostIp);
+    if (!parsedHostIp.success) {
+      throw new Error(
+        `Cannot start deployment ${deploymentId}: hostIp must be a valid Tailscale IPv4 address; private routing is unavailable`
+      );
+    }
 
     const containerName = `cwc-${deploymentId.toLowerCase()}`;
     const logs: DeploymentLogEntry[] = [];
@@ -196,6 +238,7 @@ export class DockerEngine {
       deploymentId,
       memoryLimitMb,
       cpuLimitCores,
+      hostIp,
       targetPort,
     });
 
@@ -206,7 +249,7 @@ export class DockerEngine {
       '--name',
       containerName,
       '-p',
-      `0:${targetPort}`,
+      createPrivateDockerPortSpec(hostIp, targetPort),
       `--memory=${memoryLimitMb}m`,
       `--cpus=${cpuLimitCores}`,
       '--pids-limit=256',
@@ -222,7 +265,7 @@ export class DockerEngine {
 
     runArgs.push(imageTag);
 
-    let containerId: string;
+    let containerId: string | undefined;
     try {
       const { stdout } = await execFileAsync('docker', runArgs, { signal: options.signal });
       containerId = stdout.trim();
@@ -237,48 +280,63 @@ export class DockerEngine {
       throw new Error(`Failed to run container ${containerName}: ${message}`, { cause: err });
     }
 
-    // Inspect assigned ephemeral host port
-    const assignedPort = await this.inspectAssignedPort(containerId, targetPort);
-    const publicUrl = `http://localhost:${assignedPort}`;
-    addLog(
-      `Container port ${targetPort} mapped to host port ${assignedPort} (${publicUrl})`,
-      'system',
-      'info'
-    );
+    try {
+      // Inspect and verify Docker's actual binding. Docker Desktop may accept a
+      // host address but publish a wildcard binding in its Linux VM; that is
+      // unsafe and must fail before the deployment is reported as running.
+      const portBinding = await this.inspectPrivatePortBinding(containerId, targetPort, hostIp);
+      const assignedPort = portBinding.hostPort;
+      const publicUrl = `http://${hostIp}:${assignedPort}`;
+      addLog(
+        `Container port ${targetPort} mapped privately to ${hostIp}:${assignedPort}`,
+        'system',
+        'info'
+      );
 
-    // Verify enforced kernel resource caps via docker inspect
-    const resourceCaps = await this.inspectContainerResourceLimits(containerId);
-    logger.info(`Enforced resource caps verified for container ${containerId.substring(0, 12)}`, {
-      memoryBytes: resourceCaps.memoryBytes,
-      nanoCpus: resourceCaps.nanoCpus,
-      pidsLimit: resourceCaps.pidsLimit,
-    });
+      // Verify enforced kernel resource caps via docker inspect
+      const resourceCaps = await this.inspectContainerResourceLimits(containerId);
+      logger.info(`Enforced resource caps verified for container ${containerId.substring(0, 12)}`, {
+        memoryBytes: resourceCaps.memoryBytes,
+        nanoCpus: resourceCaps.nanoCpus,
+        pidsLimit: resourceCaps.pidsLimit,
+      });
 
-    // Register active container in memory
-    this.activeContainers.set(deploymentId, {
-      deploymentId,
-      containerId,
-      hostPort: assignedPort,
-    });
+      // Register active container in memory
+      this.activeContainers.set(deploymentId, {
+        deploymentId,
+        containerId,
+        hostPort: assignedPort,
+      });
 
-    // Health verification
-    await this.verifyHealth(containerId, assignedPort, healthCheckPath, addLog);
+      // Health verification must use the same private interface advertised to
+      // the gateway, not localhost (which would only test this host).
+      await this.verifyHealth(containerId, hostIp, assignedPort, healthCheckPath, addLog);
 
-    return {
-      containerId,
-      assignedPort,
-      publicUrl,
-      resourceCaps,
-      logs,
-    };
+      return {
+        containerId,
+        assignedPort,
+        publicUrl,
+        resourceCaps,
+        logs,
+      };
+    } catch (err: unknown) {
+      if (containerId) {
+        await this.forceRemoveContainer(containerId);
+      }
+      throw err;
+    }
   }
 
   /**
    * Inspects the host port dynamically assigned by Docker for the target container port.
    */
-  public async inspectAssignedPort(containerId: string, targetPort: number): Promise<number> {
+  public async inspectPrivatePortBinding(
+    containerId: string,
+    targetPort: number,
+    expectedHostIp: string
+  ): Promise<DockerPortBinding> {
     try {
-      const formatString = `{{(index (index .NetworkSettings.Ports "${targetPort}/tcp") 0).HostPort}}`;
+      const formatString = `{{json (index .NetworkSettings.Ports "${targetPort}/tcp")}}`;
       const { stdout } = await execFileAsync('docker', [
         'inspect',
         '--format',
@@ -286,20 +344,43 @@ export class DockerEngine {
         containerId,
       ]);
 
-      const port = parseInt(stdout.trim(), 10);
-      if (isNaN(port) || port <= 0) {
-        throw new Error(
-          `Invalid host port returned for container port ${targetPort}: "${stdout.trim()}"`
-        );
+      const bindings = JSON.parse(stdout.trim()) as unknown;
+      if (!Array.isArray(bindings) || bindings.length === 0) {
+        throw new Error(`Docker returned no host binding for container port ${targetPort}`);
       }
 
-      return port;
-    } catch (err) {
+      const binding = bindings[0];
+      if (
+        typeof binding !== 'object' ||
+        binding === null ||
+        !('HostIp' in binding) ||
+        !('HostPort' in binding) ||
+        typeof binding.HostIp !== 'string' ||
+        typeof binding.HostPort !== 'string'
+      ) {
+        throw new Error(`Docker returned an invalid host binding for container port ${targetPort}`);
+      }
+
+      return validatePrivateDockerBinding(
+        { hostIp: binding.HostIp, hostPort: Number.parseInt(binding.HostPort, 10) },
+        expectedHostIp
+      );
+    } catch (err: unknown) {
       logger.error(`Failed to inspect host port for container ${containerId}`, err);
-      throw new Error(`Could not determine assigned host port for container ${containerId}`, {
+      throw new Error(`Could not verify private host port for container ${containerId}`, {
         cause: err,
       });
     }
+  }
+
+  /** Backwards-compatible port accessor; callers that route traffic should use the private binding API. */
+  public async inspectAssignedPort(
+    containerId: string,
+    targetPort: number,
+    expectedHostIp: string
+  ): Promise<number> {
+    const binding = await this.inspectPrivatePortBinding(containerId, targetPort, expectedHostIp);
+    return binding.hostPort;
   }
 
   /**
@@ -333,6 +414,7 @@ export class DockerEngine {
    */
   private async verifyHealth(
     containerId: string,
+    hostIp: string,
     hostPort: number,
     healthCheckPath: string | undefined,
     addLog: (
@@ -344,7 +426,7 @@ export class DockerEngine {
     const maxAttempts = 30; // 30 seconds
     const intervalMs = 1000;
     const testUrl = healthCheckPath
-      ? `http://localhost:${hostPort}${healthCheckPath.startsWith('/') ? '' : '/'}${healthCheckPath}`
+      ? `http://${hostIp}:${hostPort}${healthCheckPath.startsWith('/') ? '' : '/'}${healthCheckPath}`
       : null;
 
     logger.info(`Verifying container ${containerId.substring(0, 12)} health...`, {

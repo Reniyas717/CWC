@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { eq, and, or, asc, isNull } from 'drizzle-orm';
+import { eq, and, or, asc, isNull, count, inArray } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
 import {
   WorkerRegistrationSchema,
   WorkerHeartbeatSchema,
@@ -14,6 +15,7 @@ import { workerNodes, deployments, applications } from '../db/schema.js';
 import { recordWorkerHeartbeatInCache, removeWorkerFromCache } from '../cache/redis.js';
 import { sweepWorkerHealth } from '../services/sweeper.js';
 import {
+  evaluateWorkerEligibility,
   getWorkerLoadScores,
   schedulePendingDeployments,
   rebalanceClusterWorkloads,
@@ -218,18 +220,6 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
 
   const payload = parseResult.data;
 
-  // Derive client IP address (prefer client-reported Tailscale or header forwarded)
-  let rawIp =
-    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
-    req.socket.remoteAddress ||
-    '127.0.0.1';
-  if (rawIp === '::1' || rawIp === '::ffff:127.0.0.1') {
-    rawIp = '127.0.0.1';
-  } else if (rawIp.startsWith('::ffff:')) {
-    rawIp = rawIp.replace('::ffff:', '');
-  }
-  const clientIp = rawIp;
-
   const now = new Date();
 
   try {
@@ -240,7 +230,7 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
         id: payload.id,
         name: payload.name,
         hostname: payload.hostname,
-        ipAddress: clientIp,
+        ipAddress: payload.ipAddress,
         port: payload.port,
         state: 'idle',
         cpuCores: payload.resources.cpuCount,
@@ -259,7 +249,7 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
         set: {
           name: payload.name,
           hostname: payload.hostname,
-          ipAddress: clientIp,
+          ipAddress: payload.ipAddress,
           port: payload.port,
           state: 'idle',
           cpuCores: payload.resources.cpuCount,
@@ -490,20 +480,133 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
       return;
     }
 
-    // Find oldest queued deployment assigned to this worker or currently unassigned
-    const pendingDeployments = await db
-      .select()
-      .from(deployments)
-      .where(
-        and(
-          eq(deployments.state, 'queued'),
-          or(eq(deployments.workerId, id), isNull(deployments.workerId))
+    /**
+     * Claim inside one transaction. The worker row serializes claims made by
+     * concurrent polls from this worker, while SKIP LOCKED prevents two
+     * workers from selecting the same queued deployment. The eligibility
+     * check runs after the worker row is locked, so the capacity decision and
+     * the state transition observe one consistent snapshot.
+     */
+    const claimedTask = await db.transaction(async (tx) => {
+      const lockedWorkers = await tx
+        .select()
+        .from(workerNodes)
+        .where(eq(workerNodes.id, id))
+        .for('update');
+      const worker = lockedWorkers[0];
+
+      if (!worker) {
+        return { kind: 'missing-worker' as const };
+      }
+
+      // A build/deploy reservation is not reflected in activeContainers until
+      // the worker reports running. Count those reservations while deciding
+      // whether another task can be claimed.
+      const reservedRows = await tx
+        .select({ value: count() })
+        .from(deployments)
+        .where(
+          and(
+            eq(deployments.workerId, id),
+            inArray(deployments.state, ['building', 'deploying'])
+          )
+        );
+      const reservedDeployments = Number(reservedRows[0]?.value ?? 0);
+      const workerForEligibility = {
+        ...worker,
+        activeContainers: worker.activeContainers + reservedDeployments,
+      };
+
+      // Lock one candidate row. An unassigned row can be selected by another
+      // worker, so SKIP LOCKED is essential for concurrent worker polling.
+      const pendingDeployments = await tx
+        .select()
+        .from(deployments)
+        .where(
+          and(
+            eq(deployments.state, 'queued'),
+            isNull(deployments.routingError),
+            or(eq(deployments.workerId, id), isNull(deployments.workerId))
+          )
         )
-      )
-      .orderBy(asc(deployments.createdAt))
-      .limit(1);
+        .orderBy(asc(deployments.createdAt))
+        .limit(1)
+        .for('update', { skipLocked: true });
 
-    if (pendingDeployments.length === 0) {
+      const dep = pendingDeployments[0];
+      if (!dep) {
+        return { kind: 'empty' as const };
+      }
+
+      const appRows = await tx
+        .select()
+        .from(applications)
+        .where(eq(applications.id, dep.applicationId));
+      const app = appRows[0];
+      if (!app) {
+        return { kind: 'empty' as const };
+      }
+
+      const eligibility = evaluateWorkerEligibility(workerForEligibility, app.memoryLimitMb);
+      if (!eligibility.eligible) {
+        return {
+          kind: 'ineligible' as const,
+          reasons: eligibility.rejectionReasons,
+        };
+      }
+
+      const now = new Date();
+      const attemptId = randomUUID();
+      const updatedDeployments = await tx
+        .update(deployments)
+        .set({
+          workerId: id,
+          attemptId,
+          state: 'building',
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(deployments.id, dep.id),
+            eq(deployments.state, 'queued'),
+            or(eq(deployments.workerId, id), isNull(deployments.workerId))
+          )
+        )
+        .returning();
+
+      if (updatedDeployments.length === 0) {
+        return { kind: 'empty' as const };
+      }
+
+      return {
+        kind: 'claimed' as const,
+        deployment: updatedDeployments[0],
+        app,
+      };
+    });
+
+    if (claimedTask.kind === 'missing-worker') {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'WORKER_NOT_REGISTERED',
+          message: `Worker node '${id}' is not registered. Please register first.`,
+        },
+      });
+      return;
+    }
+
+    if (claimedTask.kind === 'ineligible') {
+      res.status(200).json({
+        success: true,
+        hasTask: false,
+        reason: 'WORKER_INELIGIBLE',
+        details: claimedTask.reasons,
+      });
+      return;
+    }
+
+    if (claimedTask.kind === 'empty') {
       res.status(200).json({
         success: true,
         hasTask: false,
@@ -511,37 +614,12 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
       return;
     }
 
-    const dep = pendingDeployments[0];
-
-    // Fetch corresponding application details
-    const appRows = await db
-      .select()
-      .from(applications)
-      .where(eq(applications.id, dep.applicationId));
-
-    if (appRows.length === 0) {
-      res.status(200).json({
-        success: true,
-        hasTask: false,
-      });
-      return;
-    }
-
-    const app = appRows[0];
-    const now = new Date();
-
-    // Lock this task to the polling worker and transition state to 'building'
-    await db
-      .update(deployments)
-      .set({
-        workerId: id,
-        state: 'building',
-        updatedAt: now,
-      })
-      .where(eq(deployments.id, dep.id));
+    const dep = claimedTask.deployment;
+    const app = claimedTask.app;
 
     const taskPayload: DeploymentTaskPayload = {
       deploymentId: dep.id,
+      attemptId: dep.attemptId ?? undefined,
       applicationId: app.id,
       git: {
         repositoryUrl: app.repositoryUrl,

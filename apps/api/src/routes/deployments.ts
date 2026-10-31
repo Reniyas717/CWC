@@ -2,7 +2,12 @@ import { Router, Request, Response } from 'express';
 import { eq, desc, asc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import { Deployment, DeploymentLogEntry, AppFrameworkSchema } from '@cloud-without-clouds/shared';
+import {
+  Deployment,
+  DeploymentLogEntry,
+  AppFrameworkSchema,
+  RoutingStatusSchema,
+} from '@cloud-without-clouds/shared';
 import { requireAdmin, optionalAdmin } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
 import {
@@ -15,6 +20,7 @@ import {
 } from '../db/schema.js';
 import { selectBestWorker, evaluateWorkerEligibility } from '../services/scheduler.js';
 import { gatewayClient } from '../services/gateway-client.js';
+import { removeDeploymentRoute } from '../services/route-cleanup.js';
 
 export const deploymentsRouter: Router = Router();
 
@@ -39,6 +45,12 @@ async function ensureDefaultAdminUser(): Promise<string> {
  * Transforms a database deployment record into the canonical `Deployment` type.
  */
 function mapDeploymentRow(row: typeof deployments.$inferSelect): Deployment {
+  const routingStatus = RoutingStatusSchema.safeParse(row.routingStatus);
+  if (!routingStatus.success) {
+    console.warn(
+      `[Deployments] Invalid routing status '${row.routingStatus}' for ${row.id}; using pending`
+    );
+  }
   return {
     id: row.id,
     applicationId: row.applicationId,
@@ -47,9 +59,13 @@ function mapDeploymentRow(row: typeof deployments.$inferSelect): Deployment {
     gitBranch: row.gitBranch,
     state: row.state,
     workerId: row.workerId ?? undefined,
+    attemptId: row.attemptId ?? undefined,
     containerId: row.containerId ?? undefined,
     assignedPort: row.assignedPort ?? undefined,
     publicUrl: row.publicUrl ?? undefined,
+    workerUrl: row.workerUrl ?? undefined,
+    routingStatus: routingStatus.success ? routingStatus.data : 'pending',
+    routingError: row.routingError ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -382,11 +398,18 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
     }
 
     const now = new Date();
+    const previousAttemptId = current.attemptId ?? undefined;
 
     await db
       .update(deployments)
       .set({
         state: 'cancelled',
+        // Invalidate the worker's assignment before notifying it. Any result
+        // already in flight now fails the attempt-identity check.
+        attemptId: null,
+        publicUrl: null,
+        routingStatus: 'pending',
+        routingError: null,
         finishedAt: now,
         updatedAt: now,
       })
@@ -399,8 +422,14 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       timestamp: now,
     });
 
-    // Remove route from Gateway
-    await gatewayClient.removeRoute(id);
+    // Remove route from Gateway. The request carries the old attempt identity
+    // so cancellation cannot delete a route published by a replacement.
+    await removeDeploymentRoute({
+      deploymentId: id,
+      gatewayAttemptId: previousAttemptId,
+      currentAttemptId: null,
+      expectedState: 'cancelled',
+    });
 
     res.status(200).json({
       success: true,
@@ -584,16 +613,34 @@ deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Respons
 
     const current = existing[0];
 
-    // Remove route from Gateway idempotently
-    await gatewayClient.removeRoute(id);
-
-    // Guard against deleting active workloads without stopping them first
-    if (current.state === 'running' || current.state === 'building' || current.state === 'queued') {
+    // Reject active workloads before touching the gateway. Operators must
+    // cancel/stop the workload explicitly; a rejected delete must not cause
+    // an otherwise healthy public route to disappear.
+    if (
+      current.state === 'running' ||
+      current.state === 'building' ||
+      current.state === 'deploying' ||
+      current.state === 'queued'
+    ) {
       res.status(400).json({
         success: false,
         error: {
           code: 'ACTIVE_DEPLOYMENT',
           message: `Cannot delete active deployment '${id}' in state '${current.state}'. Please cancel the deployment first.`,
+        },
+      });
+      return;
+    }
+
+    // Remove route from Gateway idempotently. Do not delete the database row
+    // while the edge still has an unreachable-to-control-plane route.
+    const routeRemoved = await gatewayClient.removeRoute(id, current.attemptId ?? undefined);
+    if (!routeRemoved) {
+      res.status(502).json({
+        success: false,
+        error: {
+          code: 'ROUTE_CLEANUP_FAILED',
+          message: 'Gateway route removal failed; retry the delete operation',
         },
       });
       return;
