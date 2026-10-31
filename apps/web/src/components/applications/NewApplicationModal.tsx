@@ -8,14 +8,13 @@ import {
   Server,
   Cpu,
   HardDrive,
-  Rocket,
-  Sparkles,
   Globe,
   Code,
   FileCode,
   Terminal,
   ShieldCheck,
-  Zap,
+  Layers,
+  ArrowRight,
 } from 'lucide-react';
 import { AppFramework, CreateAppInput } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
@@ -221,7 +220,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-lg bg-secondary flex items-center justify-center shrink-0">
-              <Rocket className="h-4 w-4 text-foreground" />
+              <Layers className="h-4 w-4 text-foreground" />
             </div>
             <div>
               <h2
@@ -247,8 +246,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
 
         {/* Quick Presets Strip (Horizontal) */}
         <div className="px-6 py-2.5 bg-secondary/30 border-b border-border flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0 text-xs">
-          <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1 shrink-0">
-            <Sparkles className="h-3 w-3" />
+          <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-wider shrink-0">
             Presets:
           </span>
           <button
@@ -256,7 +254,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
             onClick={() => applyPreset('express')}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTemplate === 'express'
-                ? 'bg-primary text-primary-foreground shadow-2xs'
+                ? 'bg-primary text-primary-foreground shadow-2xs font-semibold'
                 : 'bg-card border border-border text-foreground hover:border-foreground/30'
             }`}
           >
@@ -268,7 +266,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
             onClick={() => applyPreset('static')}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTemplate === 'static'
-                ? 'bg-primary text-primary-foreground shadow-2xs'
+                ? 'bg-primary text-primary-foreground shadow-2xs font-semibold'
                 : 'bg-card border border-border text-foreground hover:border-foreground/30'
             }`}
           >
@@ -280,7 +278,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
             onClick={() => applyPreset('python')}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTemplate === 'python'
-                ? 'bg-primary text-primary-foreground shadow-2xs'
+                ? 'bg-primary text-primary-foreground shadow-2xs font-semibold'
                 : 'bg-card border border-border text-foreground hover:border-foreground/30'
             }`}
           >
@@ -289,7 +287,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
           </button>
         </div>
 
-        {/* Form Body: Two-Column Horizontal Master/Detail (No visible scrollbar, but smoothly scrollable) */}
+        {/* Form Body: Two-Column Horizontal Master/Detail (No visible scrollbar, smoothly scrollable) */}
         <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto no-scrollbar p-6">
             {errorMsg && (
@@ -467,11 +465,11 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
               <div className="lg:col-span-5 space-y-4 bg-secondary/20 p-4.5 rounded-xl border border-border">
                 <div className="flex items-center justify-between pb-2 border-b border-border">
                   <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                    <Zap className="h-3.5 w-3.5 text-foreground" />
-                    Machine & Peer Spec
+                    <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                    Resource & Worker Spec
                   </span>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                    Least-Load Policy
+                    Least-Load
                   </span>
                 </div>
 
@@ -486,20 +484,35 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                       value={port}
                       onChange={(e) => setPort(Number(e.target.value))}
                       required
+                      placeholder="3000"
                       className="h-8 text-xs font-mono bg-background"
                     />
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] text-muted-foreground">Replicas</label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={5}
-                      value={replicas}
-                      onChange={(e) => setReplicas(Number(e.target.value))}
-                      required
-                      className="h-8 text-xs font-mono bg-background"
-                    />
+                    <div className="flex items-center rounded-md border border-input bg-background h-8 px-1">
+                      <button
+                        type="button"
+                        onClick={() => setReplicas((prev) => Math.max(1, prev - 1))}
+                        className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer text-sm font-semibold select-none"
+                        title="Decrease replica count"
+                        aria-label="Decrease replicas"
+                      >
+                        -
+                      </button>
+                      <span className="flex-1 text-center font-mono text-xs font-semibold text-foreground select-none">
+                        {replicas}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setReplicas((prev) => Math.min(5, prev + 1))}
+                        className="h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer text-sm font-semibold select-none"
+                        title="Increase replica count"
+                        aria-label="Increase replicas"
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -570,11 +583,11 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-muted-foreground">Isolation:</span>
+                    <span className="text-muted-foreground">Process Limit:</span>
                     <span className="font-mono text-foreground text-[10px]">--pids-limit=256</span>
                   </div>
                   <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-muted-foreground">Ingress:</span>
+                    <span className="text-muted-foreground">Public Ingress:</span>
                     <span className="text-foreground text-[10px]">Cloudflare Quick Tunnel</span>
                   </div>
                 </div>
@@ -609,8 +622,8 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                   </>
                 ) : (
                   <>
-                    <Rocket className="h-3.5 w-3.5" />
-                    Deploy Workload
+                    <span>Deploy Application</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </>
                 )}
               </Button>
