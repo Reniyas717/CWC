@@ -68,6 +68,18 @@ assert_contains "$output" '"stage":"clone"' 'clone failure should identify clone
 output=$(PATH="$TEST_ROOT/bin:$PATH" "$SCRIPT_DIR/build-and-publish.sh" "http://github.com/example/app.git" "main" "example/app" 2>"$TEST_ROOT/log") && fail "HTTP URL should fail"
 assert_contains "$output" '"stage":"validation"' 'HTTP URL should identify validation stage'
 
+for invalid_url in \
+  "https://user:pass@github.com/example/app.git" \
+  "https://localhost/example/app.git" \
+  "https://192.168.1.20/example/app.git" \
+  "https://172.20.0.4/example/app.git"; do
+  output=$(PATH="$TEST_ROOT/bin:$PATH" "$SCRIPT_DIR/build-and-publish.sh" "$invalid_url" "main" "example/app" 2>"$TEST_ROOT/log") && fail "private or credential-bearing URL should fail: $invalid_url"
+  assert_contains "$output" '"stage":"validation"' 'private or credential-bearing URL should identify validation stage'
+done
+
+output=$(GIT_MODE=clone-failure PATH="$TEST_ROOT/bin:$PATH" "$SCRIPT_DIR/build-and-publish.sh" "https://git.example.test/example/app.git" "main" "example/app" 2>"$TEST_ROOT/log") && fail "public custom hostname should reach clone"
+assert_contains "$output" '"stage":"clone"' 'public custom hostname should not be rejected by validation'
+
 DOCKER_ARGS_LOG="$TEST_ROOT/docker-build-args"
 output=$(DOCKER_ARGS_LOG="$DOCKER_ARGS_LOG" GIT_MODE=success PATH="$TEST_ROOT/bin:$PATH" "$SCRIPT_DIR/build-and-publish.sh" "https://github.com/example/app.git" "main" "example/app" 2>"$TEST_ROOT/log") || fail "default build paths should succeed"
 assert_contains "$output" '"status":"success"' 'default build paths should succeed'
@@ -135,7 +147,17 @@ SUDO
 chmod +x "$TEST_ROOT/bin/sudo"
 cat > "$TEST_ROOT/bin/git" <<'GIT_STARTUP'
 #!/usr/bin/env bash
-printf 'simulated clone failure\n' >&2
+set -Eeuo pipefail
+if [[ $1 == clone ]]; then
+  target="${!#}"
+  mkdir -p "$target"
+  printf 'FROM scratch\n' > "$target/Dockerfile"
+  exit 0
+fi
+if [[ $1 == -C && $3 == rev-parse && $4 == HEAD ]]; then
+  printf '0123456789012345678901234567890123456789\n'
+  exit 0
+fi
 exit 1
 GIT_STARTUP
 chmod +x "$TEST_ROOT/bin/git"
@@ -148,7 +170,7 @@ commands=$(<"$TEST_ROOT/docker-commands")
 start_log=$(<"$TEST_ROOT/start-log")
 assert_contains "$commands" 'systemctl start docker' 'daemon startup should invoke systemctl'
 assert_contains "$start_log" 'attempting to start it' 'daemon startup should be logged'
-assert_contains "$output" '"stage":"clone"' 'daemon startup should complete before clone'
+assert_contains "$output" '"stage":"build"' 'daemon startup should complete before build'
 
 printf 'ok - CLI starts an unavailable daemon and verifies readiness\n'
 
