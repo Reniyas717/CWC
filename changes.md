@@ -418,3 +418,77 @@ In **Phase 5**, we implemented the automated node health supervision and failove
    - `pnpm check-types`: **0 errors** across all packages.
    - `pnpm lint`: **0 ESLint errors** across all packages.
    - `pnpm --filter @cloud-without-clouds/api build`: Compiled ESM bundle cleanly.
+
+
+---
+
+# Changes & Implementation Log: Phase 6 — Resource-Aware Least-Loaded Scheduler Placement Engine
+
+## 1. Overview & Objectives
+
+In **Phase 6**, we implemented the resource-aware scheduler placement engine in the Control Plane API (`apps/api`), executing the exact mathematical specification from Section 9 of `ARCHITECTURE.md` and Section 3 of `AGENTS.md`:
+- Multi-worker filtering enforcing all 4 strict eligibility criteria (active state, heartbeat $\le 30$s, concurrency capacity cap, and RAM headroom).
+- Exact load scoring formula $S(W)$ computing weighted memory consumption ($40\%$), CPU utilization ($40\%$), and active container density ($20\%$).
+- $1\%$ score tie-breaking mechanism favoring workers with higher free memory (`freeMemoryMb`).
+- Automated unassigned queue re-evaluation: automatically assigns queued workloads when workers register or transmit telemetry heartbeats (capacity exhaustion recovery).
+- Integration into deployment submission (`POST /api/v1/deployments`) with discrete event auditing.
+- Transparent inspection endpoint (`GET /api/v1/workers/scores`) exposing live metrics, component ratios, and eligibility status for frontend dashboards and monitoring tools.
+- Strict worker validation in task polling (`GET /api/v1/workers/:id/tasks`) preventing unregistered nodes from locking tasks.
+
+---
+
+## 2. Core Architecture & Modules Implemented
+
+### 1. Scheduler Placement Service (`apps/api/src/services/scheduler.ts`)
+- **Load Scoring Formula $S(W)$**:
+  $$S(W) = \left( 0.4 \times \frac{W.\text{usedMemoryMb}}{W.\text{totalMemoryMb}} \right) + \left( 0.4 \times \frac{W.\text{cpuUsagePercent}}{100} \right) + \left( 0.2 \times \frac{W.\text{activeContainers}}{W.\text{maxConcurrentWorkloads}} \right)$$
+  - Implemented in `calculateWorkerLoadScore(worker)` with zero-division guards and ratio normalization.
+- **Eligibility Evaluation (`evaluateWorkerEligibility`)**:
+  - $W.\text{state} \in \{\text{'idle'}, \text{'busy'}\}$
+  - $\text{now}() - W.\text{lastHeartbeatAt} \le 30\text{ seconds}$
+  - $W.\text{activeContainers} < W.\text{maxConcurrentWorkloads}$
+  - $W.\text{freeMemoryMb} \ge D.\text{memoryLimitMb}$
+- **Optimal Placement Algorithm (`selectBestWorker`)**:
+  - Validates preferred worker if requested.
+  - Evaluates all active nodes against eligibility filters.
+  - Sorts candidates ascending by $S(W)$.
+  - Applies $1\%$ tie-breaking rule: if $|S(W_1) - S(W_2)| < 0.01$, selects the worker with greater `freeMemoryMb`.
+- **Queue Exhaustion Recovery (`schedulePendingDeployments`)**:
+  - Queries all unassigned queued deployments (`workerId IS NULL`) ordered by `createdAt ASC`.
+  - Attempts placement on eligible workers; assigns worker and logs `SCHEDULED` event with the placement score.
+
+### 2. Integration with API Routes
+- **`POST /api/v1/deployments` (`apps/api/src/routes/deployments.ts`)**:
+  - Replaced single-worker lookup with `selectBestWorker()`.
+  - Records placement score or exhaustion status in `deployment_events` audit history.
+- **`GET /api/v1/workers/scores` (`apps/api/src/routes/workers.ts`)**:
+  - Returns calculated scores, memory ratios, CPU ratios, concurrency ratios, and eligibility diagnostics for all nodes.
+- **`POST /api/v1/workers/register` & `POST /api/v1/workers/heartbeat`**:
+  - Automatically triggers `schedulePendingDeployments()` in the background to drain unassigned queued workloads whenever worker capacity becomes available.
+- **`GET /api/v1/workers/:id/tasks`**:
+  - Added node registration check returning HTTP 404 `WORKER_NOT_REGISTERED` if an unregistered worker attempts task polling.
+
+---
+
+## 3. Verification & Quality Assurance
+
+1. **Dedicated Phase 6 Test Suite (`apps/api/test-phase6.js`)**:
+   - 17 automated assertions verified against PostgreSQL and Express:
+     - **Test 1 (Formula Exactness):** Verified Worker A ($20\%$ RAM, $30\%$ CPU, $10\%$ containers) produces score exactly $0.2200$.
+     - **Test 2 (Least-Loaded Placement):** Verified scheduler placed deployment on Worker A ($S=0.22$) instead of Worker B ($S=0.68$).
+     - **Test 3 (1% Tie-Breaking):** Verified two candidates with identical scores broke ties in favor of the candidate with 8,000MB free RAM over 3,000MB.
+     - **Test 4 (Resource Constraints):** Verified RAM-depleted and capacity-saturated workers were correctly rejected with diagnostic reasons.
+     - **Test 5 (Exhaustion Recovery):** Verified unassigned queued deployment was automatically scheduled when a fresh worker registered.
+   - Result: **17 passed, 0 failed**.
+
+2. **Full Regression Test Suite (All Milestones)**:
+   - `test-auth.js`: **28 passed, 0 failed**.
+   - `test-phase4.js`: **18 passed, 0 failed**.
+   - `test-phase5.js`: **25 passed, 0 failed**.
+   - `test-phase6.js`: **17 passed, 0 failed**.
+   - **Total Automated Assertions: 88 passed, 0 failed**.
+
+3. **Type Checking, Linting & Build**:
+   - `pnpm check-types`: **0 errors** across all packages.
+   - `pnpm lint`: **0 ESLint errors** (and 0 warnings) across all packages.
+   - `pnpm --filter @cloud-without-clouds/api build`: Compiled ESM bundle successfully (`tsup` 54.78 KB).

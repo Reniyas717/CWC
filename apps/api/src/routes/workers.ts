@@ -20,6 +20,7 @@ import {
   removeWorkerFromCache,
 } from '../cache/redis.js';
 import { sweepWorkerHealth } from '../services/sweeper.js';
+import { getWorkerLoadScores, schedulePendingDeployments } from '../services/scheduler.js';
 
 export const workersRouter: Router = Router();
 
@@ -74,6 +75,33 @@ workersRouter.get('/', optionalAdmin, async (_req: Request, res: Response) => {
       error: {
         code: 'DATABASE_ERROR',
         message: 'Failed to retrieve worker nodes',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * GET /api/v1/workers/scores
+ * Returns load scores and resource eligibility breakdowns for all registered worker nodes.
+ * Accepts optional query parameter ?memoryMb=512. Guarded by optionalAdmin.
+ */
+workersRouter.get('/scores', optionalAdmin, async (req: Request, res: Response) => {
+  const memoryMb = req.query.memoryMb ? Number(req.query.memoryMb) : 512;
+  try {
+    const data = await getWorkerLoadScores(isNaN(memoryMb) ? 512 : memoryMb);
+    res.status(200).json({
+      success: true,
+      count: data.length,
+      data,
+      message: 'Worker load scores retrieved successfully',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SCORE_CALCULATION_FAILED',
+        message: 'Failed to calculate worker load scores',
         details: error instanceof Error ? error.message : String(error),
       },
     });
@@ -227,6 +255,11 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
       timestamp: now.toISOString(),
     };
 
+    // Re-evaluate pending unassigned deployments in background
+    schedulePendingDeployments().catch((err) => {
+      console.warn('[Scheduler] Error scheduling pending deployments on worker register:', err);
+    });
+
     res.status(200).json(response);
   } catch (error) {
     res.status(500).json({
@@ -303,6 +336,11 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
       acknowledged: true,
       timestamp: now.toISOString(),
     };
+
+    // Re-evaluate pending unassigned deployments in background
+    schedulePendingDeployments().catch((err) => {
+      console.warn('[Scheduler] Error scheduling pending deployments on worker heartbeat:', err);
+    });
 
     res.status(200).json(response);
   } catch (error) {
@@ -387,6 +425,23 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
   const { id } = req.params;
 
   try {
+    // Verify worker is registered
+    const existingWorker = await db
+      .select()
+      .from(workerNodes)
+      .where(eq(workerNodes.id, id));
+
+    if (existingWorker.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'WORKER_NOT_REGISTERED',
+          message: `Worker node '${id}' is not registered. Please register first.`,
+        },
+      });
+      return;
+    }
+
     // Find oldest queued deployment assigned to this worker or currently unassigned
     const pendingDeployments = await db
       .select()
