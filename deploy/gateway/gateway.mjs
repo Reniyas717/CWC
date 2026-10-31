@@ -117,8 +117,12 @@ export class QuickTunnel {
     this.spawn = spawnImpl;
   }
 
-  async start(listenerPort) {
+  async start(listenerPort, { onExit } = {}) {
     const child = this.spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stopped = false;
+    child.once('exit', () => {
+      if (!stopped) onExit?.();
+    });
     const output = async function* () {
       for await (const chunk of child.stderr) yield chunk.toString();
       for await (const chunk of child.stdout) yield chunk.toString();
@@ -133,7 +137,13 @@ export class QuickTunnel {
       if (next.done) break;
       buffer += next.value;
       const match = buffer.match(/https:\/\/(?!api\.)[-a-z0-9]+\.trycloudflare\.com/i);
-      if (match) return { url: match[0], stop: () => child.kill('SIGTERM') };
+      if (match) return {
+        url: match[0],
+        stop: () => {
+          stopped = true;
+          child.kill('SIGTERM');
+        },
+      };
     }
     child.kill('SIGTERM');
     throw new GatewayError(502, 'TUNNEL_START_FAILED', 'cloudflared did not provide a public URL');
@@ -166,13 +176,25 @@ export class RouteManager {
     await this.caddy.apply(next);
     let tunnel;
     try {
-      tunnel = await this.tunnel.start(listenerPort);
+      tunnel = await this.tunnel.start(listenerPort, { onExit: () => this.restartTunnel(route.deploymentId).catch(() => {}) });
     } catch (error) {
       await this.caddy.remove(route.deploymentId).catch(() => {});
       throw error;
     }
     const record = { ...next, status: 'ready', publicUrl: tunnel.url, stopTunnel: tunnel.stop };
     this.routes.set(route.deploymentId, record);
+    return this.#public(record);
+  }
+
+  async restartTunnel(deploymentId) {
+    const record = this.routes.get(deploymentId);
+    if (!record) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
+    record.status = 'restarting';
+    record.stopTunnel?.();
+    const tunnel = await this.tunnel.start(record.listenerPort, { onExit: () => this.restartTunnel(deploymentId).catch(() => {}) });
+    record.stopTunnel = tunnel.stop;
+    record.publicUrl = tunnel.url;
+    record.status = 'ready';
     return this.#public(record);
   }
 
