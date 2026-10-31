@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "tsx src/db/migrate.ts",
+    "test:auth": "node test-auth.js",
     "check-types": "tsc --noEmit",
     "lint": "eslint src"
   },
