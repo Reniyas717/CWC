@@ -16,6 +16,7 @@ import { api } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
 import { DataError } from '@/components/ui/data-error';
 
 export function LogsPage() {
@@ -24,6 +25,8 @@ export function LogsPage() {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [autoScroll, setAutoScroll] = React.useState(true);
   const [isCopied, setIsCopied] = React.useState(false);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(50);
   const terminalEndRef = React.useRef<HTMLDivElement>(null);
 
   // Fetch all deployments
@@ -73,6 +76,22 @@ export function LogsPage() {
       return matchesStream && matchesSearch;
     });
   }, [logs, streamFilter, searchQuery]);
+
+  // Paginated log slice
+  const paginatedLogs = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLogs.slice(start, start + pageSize);
+  }, [filteredLogs, currentPage, pageSize]);
+
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val);
+    setCurrentPage(1);
+  };
+
+  const handleStreamFilterChange = (val: string) => {
+    setStreamFilter(val);
+    setCurrentPage(1);
+  };
 
   const tailStatus = isDeploymentsError || isLogsError
     ? 'Unavailable'
@@ -261,7 +280,7 @@ export function LogsPage() {
               <button
                 key={stream}
                 type="button"
-                onClick={() => setStreamFilter(stream)}
+                onClick={() => handleStreamFilterChange(stream)}
                 className={`px-2.5 py-0.5 rounded text-[11px] font-mono capitalize transition-colors cursor-pointer border ${
                   streamFilter === stream
                     ? 'bg-primary text-primary-foreground border-primary font-semibold'
@@ -280,7 +299,7 @@ export function LogsPage() {
               <Input
                 placeholder="Filter terminal output..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 className="h-7.5 text-xs pl-8 font-mono bg-background"
               />
             </div>
@@ -314,7 +333,8 @@ export function LogsPage() {
               </p>
             </div>
           ) : (
-            filteredLogs.map((log, idx) => {
+            paginatedLogs.map((log, idx) => {
+              const lineNumber = (currentPage - 1) * pageSize + idx + 1;
               const timeStr = new Date(log.timestamp).toLocaleTimeString();
               const levelColor =
                 log.level === 'error'
@@ -331,7 +351,7 @@ export function LogsPage() {
                   className="flex items-start gap-3 hover:bg-secondary/40 py-0.5 px-2 rounded transition-colors group leading-relaxed"
                 >
                   <span className="text-[10px] text-muted-foreground/50 w-7 text-right select-none shrink-0 pt-0.5 font-mono">
-                    {idx + 1}
+                    {lineNumber}
                   </span>
                   <span className="text-[10px] text-muted-foreground shrink-0 select-none pt-0.5 font-mono">
                     {timeStr}
@@ -354,6 +374,22 @@ export function LogsPage() {
           )}
           <div ref={terminalEndRef} />
         </div>
+
+        {/* Terminal Pagination Bar */}
+        {filteredLogs.length > 0 && (
+          <div className="border-t border-border bg-card/60 px-4 py-1.5">
+            <Pagination
+              currentPage={currentPage}
+              totalItems={filteredLogs.length}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={[25, 50, 100, 200]}
+              itemLabel="log lines"
+              className="py-1"
+            />
+          </div>
+        )}
 
         {/* Terminal Status Footer */}
         <div className="p-3 px-5 border-t border-border bg-card flex items-center justify-between text-xs text-muted-foreground shrink-0 font-mono">

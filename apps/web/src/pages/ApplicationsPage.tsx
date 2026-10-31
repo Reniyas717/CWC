@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
 import { DataError } from '@/components/ui/data-error';
@@ -32,6 +33,8 @@ export function ApplicationsPage() {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedFramework, setSelectedFramework] = React.useState<string>('all');
   const [actionSuccess, setActionSuccess] = React.useState<string | null>(null);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(5);
 
   const {
     data: apps = [],
@@ -76,14 +79,32 @@ export function ApplicationsPage() {
   });
 
   // Filter apps
-  const filteredApps = apps.filter((app) => {
-    const matchesSearch =
-      app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.git.repositoryUrl.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFw = selectedFramework === 'all' || app.framework === selectedFramework;
-    return matchesSearch && matchesFw;
-  });
+  const filteredApps = React.useMemo(() => {
+    return apps.filter((app) => {
+      const matchesSearch =
+        app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        app.slug.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        app.git.repositoryUrl.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesFw = selectedFramework === 'all' || app.framework === selectedFramework;
+      return matchesSearch && matchesFw;
+    });
+  }, [apps, searchQuery, selectedFramework]);
+
+  // Paginated slice
+  const paginatedApps = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredApps.slice(start, start + pageSize);
+  }, [filteredApps, currentPage, pageSize]);
+
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val);
+    setCurrentPage(1);
+  };
+
+  const handleFrameworkChange = (fw: string) => {
+    setSelectedFramework(fw);
+    setCurrentPage(1);
+  };
 
   // Metrics
   const totalReplicas = apps.reduce((sum, a) => sum + (a.replicas || 1), 0);
@@ -288,7 +309,7 @@ export function ApplicationsPage() {
           <Input
             placeholder="Search applications or repositories..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-9 h-9 text-xs bg-background"
           />
         </div>
@@ -298,7 +319,7 @@ export function ApplicationsPage() {
             <button
               key={fw}
               type="button"
-              onClick={() => setSelectedFramework(fw)}
+              onClick={() => handleFrameworkChange(fw)}
               className={`px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors cursor-pointer shrink-0 ${
                 selectedFramework === fw
                   ? 'bg-primary text-primary-foreground shadow-2xs font-semibold'
@@ -336,143 +357,172 @@ export function ApplicationsPage() {
             </div>
             <CardTitle className="text-base">No Matching Applications</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Deploy your first Git repository to begin distributing container workloads across
-              connected developer laptops.
+              {searchQuery || selectedFramework !== 'all'
+                ? `No applications found matching your search "${searchQuery || selectedFramework}".`
+                : 'Deploy your first Git repository to begin distributing container workloads across connected developer laptops.'}
             </p>
-            <Button onClick={() => setIsModalOpen(true)} size="sm" className="mt-2 text-xs">
-              <Plus className="h-3.5 w-3.5 mr-1" />
-              Deploy Application
-            </Button>
+            {searchQuery || selectedFramework !== 'all' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  handleSearchChange('');
+                  handleFrameworkChange('all');
+                }}
+                className="mt-2 text-xs"
+              >
+                Reset Filters
+              </Button>
+            ) : (
+              <Button onClick={() => setIsModalOpen(true)} size="sm" className="mt-2 text-xs">
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Deploy Application
+              </Button>
+            )}
           </div>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {filteredApps.map((app) => {
-            const latestDep = getLatestDeployment(app.id);
-            const isTerminal =
-              !latestDep ||
-              latestDep.state === 'stopped' ||
-              latestDep.state === 'failed' ||
-              latestDep.state === 'cancelled';
+        <div className="space-y-4">
+          <div className="space-y-3">
+            {paginatedApps.map((app) => {
+              const latestDep = getLatestDeployment(app.id);
+              const isTerminal =
+                !latestDep ||
+                latestDep.state === 'stopped' ||
+                latestDep.state === 'failed' ||
+                latestDep.state === 'cancelled';
 
-            return (
-              <Card key={app.id} className="hover:border-foreground/20 transition-all">
-                <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  {/* Left: App Identity & Git Source */}
-                  <div className="space-y-2 min-w-0">
-                    <div className="flex items-center gap-2.5 flex-wrap">
-                      <span className="font-semibold text-sm sm:text-base text-foreground">
-                        {app.name}
-                      </span>
-                      <span className="font-mono text-[11px] text-muted-foreground bg-secondary px-2 py-0.5 rounded">
-                        /{app.slug}
-                      </span>
-                      {getFrameworkBadge(app.framework)}
-                      {getDeploymentStatusBadge(latestDep?.state)}
-                    </div>
-
-                    {/* Git Details */}
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
-                      <a
-                        href={app.git.repositoryUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1 hover:text-foreground transition-colors font-mono"
-                      >
-                        <GitBranch className="h-3.5 w-3.5" />
-                        <span className="truncate max-w-xs">{app.git.repositoryUrl}</span>
-                        <span className="bg-secondary px-1.5 py-0.2 rounded text-[11px]">
-                          {app.git.branch}
+              return (
+                <Card key={app.id} className="hover:border-foreground/20 transition-all">
+                  <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    {/* Left: App Identity & Git Source */}
+                    <div className="space-y-2 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="font-semibold text-sm sm:text-base text-foreground">
+                          {app.name}
                         </span>
-                      </a>
+                        <span className="font-mono text-[11px] text-muted-foreground bg-secondary px-2 py-0.5 rounded">
+                          /{app.slug}
+                        </span>
+                        {getFrameworkBadge(app.framework)}
+                        {getDeploymentStatusBadge(latestDep?.state)}
+                      </div>
 
-                      <span>•</span>
-
-                      <span className="flex items-center gap-1">
-                        <Cpu className="h-3 w-3 opacity-70" />
-                        {app.resourceLimits?.cpuLimitCores || 1.0} Core
-                      </span>
-
-                      <span>•</span>
-
-                      <span className="flex items-center gap-1">
-                        <HardDrive className="h-3 w-3 opacity-70" />
-                        {app.resourceLimits?.memoryLimitMb || 512} MB
-                      </span>
-
-                      <span>•</span>
-
-                      <span>{app.replicas || 1} Replicas</span>
-
-                      <span>•</span>
-
-                      <span>Port {app.port}</span>
-                    </div>
-
-                    {/* Live Public URL */}
-                    {latestDep?.routingStatus === 'ready' && latestDep.publicUrl && (
-                      <div className="pt-1 flex items-center gap-2 flex-wrap">
+                      {/* Git Details */}
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                         <a
-                          href={latestDep.publicUrl}
+                          href={app.git.repositoryUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs text-foreground font-mono hover:underline"
+                          className="flex items-center gap-1 hover:text-foreground transition-colors font-mono"
                         >
-                          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                          {latestDep.publicUrl}
-                          <ExternalLink className="h-3 w-3 opacity-60" />
+                          <GitBranch className="h-3.5 w-3.5" />
+                          <span className="truncate max-w-xs">{app.git.repositoryUrl}</span>
+                          <span className="bg-secondary px-1.5 py-0.2 rounded text-[11px]">
+                            {app.git.branch}
+                          </span>
                         </a>
-                        <span className="text-[11px] text-muted-foreground font-mono">
-                          (Port {latestDep.assignedPort})
-                        </span>
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Right: Actions */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    {latestDep && (
+                        <span>•</span>
+
+                        <span className="flex items-center gap-1">
+                          <Cpu className="h-3 w-3 opacity-70" />
+                          {app.resourceLimits?.cpuLimitCores || 1.0} Core
+                        </span>
+
+                        <span>•</span>
+
+                        <span className="flex items-center gap-1">
+                          <HardDrive className="h-3 w-3 opacity-70" />
+                          {app.resourceLimits?.memoryLimitMb || 512} MB
+                        </span>
+
+                        <span>•</span>
+
+                        <span>{app.replicas || 1} Replicas</span>
+
+                        <span>•</span>
+
+                        <span>Port {app.port}</span>
+                      </div>
+
+                      {/* Live Public URL */}
+                      {latestDep?.routingStatus === 'ready' && latestDep.publicUrl && (
+                        <div className="pt-1 flex items-center gap-2 flex-wrap">
+                          <a
+                            href={latestDep.publicUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-foreground font-mono hover:underline"
+                          >
+                            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            {latestDep.publicUrl}
+                            <ExternalLink className="h-3 w-3 opacity-60" />
+                          </a>
+                          <span className="text-[11px] text-muted-foreground font-mono">
+                            (Port {latestDep.assignedPort})
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: Actions */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {latestDep && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedLogDep(latestDep)}
+                          className="text-xs h-8 px-2.5 flex items-center gap-1.5"
+                        >
+                          <Terminal className="h-3 w-3" />
+                          <span>Logs</span>
+                        </Button>
+                      )}
+
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setSelectedLogDep(latestDep)}
-                        className="text-xs h-8 px-2.5 flex items-center gap-1.5"
+                        onClick={() => redeployMutation.mutate(app.id)}
+                        disabled={redeployMutation.isPending}
+                        className="text-xs h-8 px-2.5 flex items-center gap-1"
                       >
-                        <Terminal className="h-3 w-3" />
-                        <span>Logs</span>
+                        <RotateCw
+                          className={`h-3 w-3 ${redeployMutation.isPending ? 'animate-spin' : ''}`}
+                        />
+                        <span>Redeploy</span>
                       </Button>
-                    )}
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => redeployMutation.mutate(app.id)}
-                      disabled={redeployMutation.isPending}
-                      className="text-xs h-8 px-2.5 flex items-center gap-1"
-                    >
-                      <RotateCw
-                        className={`h-3 w-3 ${redeployMutation.isPending ? 'animate-spin' : ''}`}
-                      />
-                      <span>Redeploy</span>
-                    </Button>
-
-                    {!isTerminal && latestDep && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => cancelMutation.mutate(latestDep.id)}
-                        disabled={cancelMutation.isPending}
-                        className="text-xs h-8 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                        title="Cancel active build or container"
-                      >
-                        <StopCircle className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
+                      {!isTerminal && latestDep && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => cancelMutation.mutate(latestDep.id)}
+                          disabled={cancelMutation.isPending}
+                          className="text-xs h-8 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          title="Cancel active build or container"
+                        >
+                          <StopCircle className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </Card>
-            );
-          })}
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Pagination Controls */}
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredApps.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10, 20]}
+            itemLabel="applications"
+            className="pt-2 border-t border-border/50"
+          />
         </div>
       )}
 

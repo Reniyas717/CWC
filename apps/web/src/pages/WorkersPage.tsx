@@ -15,6 +15,8 @@ import {
   SlidersHorizontal,
   Scale,
   ArrowRight,
+  Search,
+  X,
 } from 'lucide-react';
 import { WorkerNode } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown, SweepResult } from '@/services/api';
@@ -22,6 +24,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
+import { Pagination } from '@/components/ui/pagination';
 import { DataError } from '@/components/ui/data-error';
 
 function WorkerStatusBadge({ state }: { state: WorkerNode['state'] }) {
@@ -69,6 +73,9 @@ function UsageBar({ value }: { value: number }) {
 export function WorkersPage() {
   const queryClient = useQueryClient();
   const [sweepFeedback, setSweepFeedback] = React.useState<SweepResult | null>(null);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(5);
 
   const {
     data: workers = [],
@@ -98,6 +105,31 @@ export function WorkersPage() {
       setTimeout(() => setSweepFeedback(null), 5000);
     },
   });
+
+  // Filter workers
+  const filteredWorkers = React.useMemo(() => {
+    return workers.filter((w) => {
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        w.name.toLowerCase().includes(q) ||
+        w.id.toLowerCase().includes(q) ||
+        w.hostname.toLowerCase().includes(q) ||
+        w.ipAddress.toLowerCase().includes(q)
+      );
+    });
+  }, [workers, searchQuery]);
+
+  // Paginated slice
+  const paginatedWorkers = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredWorkers.slice(start, start + pageSize);
+  }, [filteredWorkers, currentPage, pageSize]);
+
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val);
+    setCurrentPage(1);
+  };
 
   const onlineCount = workers.filter((w) => w.state !== 'offline').length;
   const totalContainers = workers.reduce(
@@ -232,6 +264,28 @@ export function WorkersPage() {
         </CardContent>
       </Card>
 
+      {/* Search Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search workers by name, ID, hostname, or IP..."
+            className="pl-9 pr-8 h-8.5 text-xs bg-card"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => handleSearchChange('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+              title="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Worker List */}
       {isLoading ? (
         <div className="space-y-3">
@@ -262,142 +316,173 @@ export function WorkersPage() {
             </p>
           </div>
         </Card>
+      ) : filteredWorkers.length === 0 ? (
+        <Card className="border border-dashed border-border p-8 text-center">
+          <div className="max-w-sm mx-auto space-y-2">
+            <p className="text-sm font-semibold text-foreground">No Matching Worker Nodes</p>
+            <p className="text-xs text-muted-foreground">
+              No worker nodes match your search query "{searchQuery}".
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleSearchChange('')}
+              className="mt-2 text-xs"
+            >
+              Clear Search
+            </Button>
+          </div>
+        </Card>
       ) : (
-        <div className="space-y-3">
-          {workers.map((worker) => {
-            const scoreInfo = getScoreForWorker(worker.id);
-            const memUsedPct = worker.resources
-              ? (worker.resources.usedMemoryMb / Math.max(worker.resources.totalMemoryMb, 1)) * 100
-              : 0;
-            const lastHeartbeat = new Date(worker.lastHeartbeatAt).getTime();
-            const secondsAgo = Math.floor((Date.now() - lastHeartbeat) / 1000);
-            const isFresh = secondsAgo < 15 && worker.state !== 'offline';
-            const isWarning = secondsAgo >= 15 && secondsAgo < 30 && worker.state !== 'offline';
-            const leaseStatus = worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
+        <div className="space-y-4">
+          <div className="space-y-3">
+            {paginatedWorkers.map((worker) => {
+              const scoreInfo = getScoreForWorker(worker.id);
+              const memUsedPct = worker.resources
+                ? (worker.resources.usedMemoryMb / Math.max(worker.resources.totalMemoryMb, 1)) * 100
+                : 0;
+              const lastHeartbeat = new Date(worker.lastHeartbeatAt).getTime();
+              const secondsAgo = Math.floor((Date.now() - lastHeartbeat) / 1000);
+              const isFresh = secondsAgo < 15 && worker.state !== 'offline';
+              const isWarning = secondsAgo >= 15 && secondsAgo < 30 && worker.state !== 'offline';
+              const leaseStatus = worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
 
-            return (
-              <Card key={worker.id} className="transition-all hover:border-foreground/20">
-                <CardContent className="p-5 space-y-4">
-                  {/* Top Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                    <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
-                        <Server className="h-4 w-4 text-muted-foreground" />
+              return (
+                <Card key={worker.id} className="transition-all hover:border-foreground/20">
+                  <CardContent className="p-5 space-y-4">
+                    {/* Top Header */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
+                          <Server className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-foreground text-sm">{worker.name}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                              {worker.hostname}
+                            </span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                              {worker.ipAddress}
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground font-mono mt-0.5">{worker.id}</p>
+                        </div>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-foreground text-sm">{worker.name}</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
-                            {worker.hostname}
+
+                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                        {scoreInfo && (
+                          <div className="text-right mr-2 hidden sm:block">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                              Placement S(W)
+                            </span>
+                            <span className="font-mono text-xs font-bold text-foreground">
+                              {scoreInfo.score.toFixed(4)}
+                            </span>
+                          </div>
+                        )}
+                        <WorkerStatusBadge state={worker.state} />
+                      </div>
+                    </div>
+
+                    {/* Telemetry Metrics Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
+                          <Cpu className="h-3 w-3" />
+                          CPU Core Usage
+                        </div>
+                        <UsageBar value={worker.resources?.cpuUsagePercent ?? 0} />
+                        <p className="text-[11px] text-muted-foreground">
+                          {worker.resources?.cpuCount ?? 0} Cores assigned
+                        </p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
+                          <HardDrive className="h-3 w-3" />
+                          Memory Utilization
+                        </div>
+                        <UsageBar value={memUsedPct} />
+                        <p className="text-[11px] text-muted-foreground">
+                          {((worker.resources?.usedMemoryMb ?? 0) / 1024).toFixed(1)} /{' '}
+                          {((worker.resources?.totalMemoryMb ?? 0) / 1024).toFixed(0)} GB
+                        </p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
+                          <Container className="h-3 w-3" />
+                          Containers Running
+                        </div>
+                        <p className="text-sm font-semibold text-foreground font-mono">
+                          {worker.resources?.activeContainers ?? 0}
+                          <span className="text-xs font-normal text-muted-foreground ml-1">
+                            / {worker.limits?.maxConcurrentWorkloads ?? 4} limit
                           </span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
-                            {worker.ipAddress}
+                        </p>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
+                          <Clock className="h-3 w-3" />
+                          Heartbeat Freshness
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              isFresh
+                                ? 'bg-emerald-500 animate-pulse'
+                                : isWarning
+                                  ? 'bg-amber-500'
+                                  : 'bg-destructive'
+                            }`}
+                          />
+                          <span className="text-xs font-mono text-foreground">
+                            {secondsAgo < 5 ? 'Just now' : `${secondsAgo}s ago`}
                           </span>
                         </div>
-                        <p className="text-xs text-muted-foreground font-mono mt-0.5">{worker.id}</p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 self-start sm:self-auto">
-                      {scoreInfo && (
-                        <div className="text-right mr-2 hidden sm:block">
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
-                            Placement S(W)
-                          </span>
-                          <span className="font-mono text-xs font-bold text-foreground">
-                            {scoreInfo.score.toFixed(4)}
+                    {/* Placement Eligibility Sub-Panel */}
+                    {scoreInfo && (
+                      <div className="pt-3 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-4 flex-wrap text-[11px] font-mono">
+                          <span>Free RAM: {(scoreInfo.freeMemoryMb / 1024).toFixed(1)} GB</span>
+                          <span>•</span>
+                          <span>CPU Ratio: {(scoreInfo.cpuRatio * 100).toFixed(0)}%</span>
+                          <span>•</span>
+                          <span>
+                            Placement Gate: {scoreInfo.eligible ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Eligible (Passed)</span>
+                            ) : (
+                              <span className="text-destructive font-semibold">Ineligible</span>
+                            )}
                           </span>
                         </div>
-                      )}
-                      <WorkerStatusBadge state={worker.state} />
-                    </div>
-                  </div>
+                        <div className="text-[10px] font-mono text-muted-foreground">
+                          Heartbeat lease: {leaseStatus}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
 
-                  {/* Telemetry Metrics Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-1">
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
-                        <Cpu className="h-3 w-3" />
-                        CPU Core Usage
-                      </div>
-                      <UsageBar value={worker.resources?.cpuUsagePercent ?? 0} />
-                      <p className="text-[11px] text-muted-foreground">
-                        {worker.resources?.cpuCount ?? 0} Cores assigned
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
-                        <HardDrive className="h-3 w-3" />
-                        Memory Utilization
-                      </div>
-                      <UsageBar value={memUsedPct} />
-                      <p className="text-[11px] text-muted-foreground">
-                        {((worker.resources?.usedMemoryMb ?? 0) / 1024).toFixed(1)} /{' '}
-                        {((worker.resources?.totalMemoryMb ?? 0) / 1024).toFixed(0)} GB
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
-                        <Container className="h-3 w-3" />
-                        Containers Running
-                      </div>
-                      <p className="text-sm font-semibold text-foreground font-mono">
-                        {worker.resources?.activeContainers ?? 0}
-                        <span className="text-xs font-normal text-muted-foreground ml-1">
-                          / {worker.limits?.maxConcurrentWorkloads ?? 4} limit
-                        </span>
-                      </p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-medium text-muted-foreground font-mono">
-                        <Clock className="h-3 w-3" />
-                        Heartbeat Freshness
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`h-2 w-2 rounded-full ${
-                            isFresh
-                              ? 'bg-emerald-500 animate-pulse'
-                              : isWarning
-                                ? 'bg-amber-500'
-                                : 'bg-destructive'
-                          }`}
-                        />
-                        <span className="text-xs font-mono text-foreground">
-                          {secondsAgo < 5 ? 'Just now' : `${secondsAgo}s ago`}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Placement Eligibility Sub-Panel */}
-                  {scoreInfo && (
-                    <div className="pt-3 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-muted-foreground">
-                      <div className="flex items-center gap-4 flex-wrap text-[11px] font-mono">
-                        <span>Free RAM: {(scoreInfo.freeMemoryMb / 1024).toFixed(1)} GB</span>
-                        <span>•</span>
-                        <span>CPU Ratio: {(scoreInfo.cpuRatio * 100).toFixed(0)}%</span>
-                        <span>•</span>
-                        <span>
-                          Placement Gate: {scoreInfo.eligible ? (
-                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Eligible (Passed)</span>
-                          ) : (
-                            <span className="text-destructive font-semibold">Ineligible</span>
-                          )}
-                        </span>
-                      </div>
-                      <div className="text-[10px] font-mono text-muted-foreground">
-                        Heartbeat lease: {leaseStatus}
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
+          {/* Pagination Controls */}
+          <Pagination
+            currentPage={currentPage}
+            totalItems={filteredWorkers.length}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+            pageSizeOptions={[5, 10, 20]}
+            itemLabel="worker nodes"
+            className="pt-2 border-t border-border/50"
+          />
         </div>
       )}
     </div>
