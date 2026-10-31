@@ -14,6 +14,7 @@ import {
 } from '../db/schema.js';
 import { selectBestWorker } from '../services/scheduler.js';
 import { gatewayClient } from '../services/gateway-client.js';
+import { removeDeploymentRoute } from '../services/route-cleanup.js';
 
 export const deploymentsRouter: Router = Router();
 
@@ -385,6 +386,7 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
     }
 
     const now = new Date();
+    const previousAttemptId = current.attemptId ?? undefined;
 
     await db
       .update(deployments)
@@ -394,8 +396,8 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
         // already in flight now fails the attempt-identity check.
         attemptId: null,
         publicUrl: null,
-        routingStatus: 'failed',
-        routingError: 'Deployment cancelled; public route removed',
+        routingStatus: 'pending',
+        routingError: null,
         finishedAt: now,
         updatedAt: now,
       })
@@ -408,8 +410,14 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       timestamp: now,
     });
 
-    // Remove route from Gateway
-    await gatewayClient.removeRoute(id);
+    // Remove route from Gateway. The request carries the old attempt identity
+    // so cancellation cannot delete a route published by a replacement.
+    await removeDeploymentRoute({
+      deploymentId: id,
+      gatewayAttemptId: previousAttemptId,
+      currentAttemptId: null,
+      expectedState: 'cancelled',
+    });
 
     res.status(200).json({
       success: true,
@@ -452,8 +460,19 @@ deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Respons
 
     const current = existing[0];
 
-    // Remove route from Gateway idempotently
-    await gatewayClient.removeRoute(id);
+    // Remove route from Gateway idempotently. Do not delete the database row
+    // while the edge still has an unreachable-to-control-plane route.
+    const routeRemoved = await gatewayClient.removeRoute(id, current.attemptId ?? undefined);
+    if (!routeRemoved) {
+      res.status(502).json({
+        success: false,
+        error: {
+          code: 'ROUTE_CLEANUP_FAILED',
+          message: 'Gateway route removal failed; retry the delete operation',
+        },
+      });
+      return;
+    }
 
     // Guard against deleting active workloads without stopping them first
     if (current.state === 'running' || current.state === 'building' || current.state === 'queued') {

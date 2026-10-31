@@ -1,7 +1,8 @@
-import { eq, and, or, lt, inArray } from 'drizzle-orm';
+import { eq, and, or, lt, inArray, isNotNull } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workerNodes, deployments, deploymentEvents } from '../db/schema.js';
 import { removeWorkerFromCache } from '../cache/redis.js';
+import { removeDeploymentRoute } from './route-cleanup.js';
 
 export interface SweepResult {
   offlineWorkers: string[];
@@ -39,6 +40,32 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
   };
 
   try {
+    // Terminal deployments whose last gateway cleanup failed remain visible
+    // as retryable errors. Re-attempt them on every sweep; a missing gateway
+    // route is treated as success by GatewayClient.
+    const pendingRouteCleanup = await db
+      .select({ id: deployments.id, state: deployments.state, attemptId: deployments.attemptId })
+      .from(deployments)
+      .where(
+        and(
+          inArray(deployments.state, ['failed', 'stopped', 'cancelled']),
+          isNotNull(deployments.routingError)
+        )
+      );
+    for (const deployment of pendingRouteCleanup) {
+      void removeDeploymentRoute({
+        deploymentId: deployment.id,
+        gatewayAttemptId: deployment.attemptId ?? undefined,
+        currentAttemptId: deployment.attemptId ?? null,
+        expectedState: deployment.state,
+      }).catch((error: unknown) => {
+        console.warn(
+          `[Sweeper] Retry route cleanup failed for ${deployment.id}:`,
+          error instanceof Error ? error.message : String(error)
+        );
+      });
+    }
+
     // 1. Find workers that timed out (not already offline or draining)
     const timedOutWorkers = await db
       .select()
@@ -53,10 +80,6 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
           lt(workerNodes.lastHeartbeatAt, cutoff)
         )
       );
-
-    if (timedOutWorkers.length === 0) {
-      return result;
-    }
 
     for (const worker of timedOutWorkers) {
       result.offlineWorkers.push(worker.id);
@@ -112,6 +135,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
 
         // Deployment was actively building, deploying, or running on the dead worker
         const nextRetry = dep.retryCount + 1;
+        const previousAttemptId = dep.attemptId ?? undefined;
 
         if (nextRetry <= MAX_RETRY_COUNT) {
           // Auto-reschedule to 'queued' for placement on another worker
@@ -143,6 +167,17 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             `[Recovery] Deployment '${dep.id}' auto-rescheduled to queued (retry ${nextRetry}/${MAX_RETRY_COUNT}).`
           );
           result.rescheduledDeployments.push(dep.id);
+          void removeDeploymentRoute({
+            deploymentId: dep.id,
+            gatewayAttemptId: previousAttemptId,
+            currentAttemptId: null,
+            expectedState: 'queued',
+          }).catch((error: unknown) => {
+            console.warn(
+              `[Sweeper] Route cleanup failed for rescheduled deployment ${dep.id}:`,
+              error instanceof Error ? error.message : String(error)
+            );
+          });
         } else {
           // Exceeded retry count - mark failed
           await db
@@ -150,6 +185,10 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             .set({
               state: 'failed',
               attemptId: null,
+              publicUrl: null,
+              workerUrl: null,
+              routingStatus: 'pending',
+              routingError: null,
               errorMessage: `Worker node '${worker.id}' went offline and maximum recovery retry limit (${MAX_RETRY_COUNT}) was exceeded.`,
               finishedAt: now,
               updatedAt: now,
@@ -167,6 +206,17 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
             `[Recovery] Deployment '${dep.id}' marked FAILED: max retries (${MAX_RETRY_COUNT}) exceeded.`
           );
           result.failedDeployments.push(dep.id);
+          void removeDeploymentRoute({
+            deploymentId: dep.id,
+            gatewayAttemptId: previousAttemptId,
+            currentAttemptId: null,
+            expectedState: 'failed',
+          }).catch((error: unknown) => {
+            console.warn(
+              `[Sweeper] Route cleanup failed for failed deployment ${dep.id}:`,
+              error instanceof Error ? error.message : String(error)
+            );
+          });
         }
       }
     }
