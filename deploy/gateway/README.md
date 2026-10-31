@@ -13,8 +13,29 @@ GATEWAY_TOKEN=replace-me node deploy/gateway/gateway.mjs
 
 The control plane calls `POST /v1/routes/<deployment-id>` with an upstream
 Tailscale IPv4 address, assigned host port, and optional `healthPath` (default
-`/`). The response contains `status` and the current temporary Quick Tunnel
-`publicUrl`. `DELETE /v1/routes/<deployment-id>` removes a stopped route.
+`/`). The response contains `status` (`ready` or `restarting`) and the current
+temporary Quick Tunnel `publicUrl`. `DELETE /v1/routes/<deployment-id>` removes
+a stopped route. All requests require `Authorization: Bearer $GATEWAY_TOKEN`.
+
+The worker-to-control-plane handoff should provide these values when a
+deployment is running:
+
+```json
+{
+  "deploymentId": "demo",
+  "workerTailscaleIp": "100.70.86.53",
+  "assignedPort": 32768,
+  "healthPath": "/"
+}
+```
+
+The control plane should only call the route endpoint after the worker reports
+`running`. A successful gateway response means the public route is `ready`;
+an error means the app may still be running but is not publicly reachable.
+When a tunnel restarts, the gateway's route status exposes the replacement
+`publicUrl`; the control plane should persist and surface that URL to the
+dashboard. These fields and any shared `routingStatus` enum require agreement
+before changing `packages/shared`.
 
 On gateway restart, the control plane must call `POST /v1/reconcile` with its
 authoritative current deployment records. The gateway does not restore a local
@@ -27,3 +48,15 @@ For a systemd installation, copy `gateway.service.example` to
 environment file with a secret `GATEWAY_TOKEN`, then enable and start the unit.
 The Ubuntu/WSL host and its distribution must remain running; systemd cannot
 recover a powered-off laptop or stopped WSL instance.
+
+## Verification status
+
+The controlled API tests run with fake Caddy, tunnel and upstream adapters and
+cover authentication, validation, readiness, route replacement, removal,
+tunnel restart, reconciliation and stale-route clearing. This environment has
+not completed real Caddy or Quick Tunnel verification: `caddy` and
+`cloudflared` are not installed in Ubuntu/WSL, and installing system packages
+requires interactive sudo access. Before the demo, install both tools, run a
+local HTTP app through Caddy, then verify a second laptop with
+`curl http://<worker-tailscale-ip>:<assigned-port>/` and confirm the assigned
+port is bound to Tailscale/private interfaces rather than a public interface.
