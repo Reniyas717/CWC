@@ -6,7 +6,7 @@ import { z } from 'zod';
 // Load .env from workspace root if present
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config(); // Fallback to current working directory
 
 const EnvSchema = z.object({
@@ -24,6 +24,8 @@ const EnvSchema = z.object({
   REDIS_PASSWORD: z.string().optional(),
   ADMIN_TOKEN: z.string().min(8).default('dev-admin-token-change-in-production'),
   WORKER_SECRET_TOKEN: z.string().min(8).default('dev-worker-secret-token-change-in-production'),
+  GATEWAY_URL: z.string().default('http://localhost:5050'),
+  GATEWAY_TOKEN: z.string().default('dev-gateway-secret-token-change-in-production'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
