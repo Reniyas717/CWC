@@ -15,10 +15,12 @@ const caddy = {
   async remove(id) { calls.push(['remove', id]); },
 };
 const tunnels = [];
+const tunnelExitHandlers = [];
 const tunnel = {
-  async start(port) {
-    const record = { url: `https://demo-${port}.trycloudflare.com`, stopped: false };
+  async start(port, options = {}) {
+    const record = { url: `https://demo-${port}-${tunnels.length}.trycloudflare.com`, stopped: false };
     tunnels.push(record);
+    tunnelExitHandlers.push(options.onExit);
     return { url: record.url, stop: () => { record.stopped = true; } };
   },
 };
@@ -55,11 +57,18 @@ response = await fetch(endpoint, { headers: { authorization: 'Bearer test-token'
 assert.equal(response.status, 200);
 assert.equal((await response.json()).data.publicUrl, published.data.publicUrl);
 
+await tunnelExitHandlers[0]();
+const recovered = manager.get('demo');
+assert.equal(recovered.status, 'ready');
+assert.notEqual(recovered.publicUrl, published.data.publicUrl);
+assert.equal(tunnels[0].stopped, true);
+assert.equal(tunnels.length, 2);
+
 response = await fetch(endpoint, { method: 'PUT', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' }, body: JSON.stringify({ upstreamIp: '100.70.86.53', upstreamPort: healthPort, healthPath: '/' }) });
 assert.equal(response.status, 201);
 const replaced = await response.json();
 assert.notEqual(replaced.data.publicUrl, published.data.publicUrl);
-assert.equal(tunnels[0].stopped, true);
+assert.equal(tunnels[1].stopped, true);
 
 const tunnelStart = tunnel.start;
 let failNextTunnel = true;
@@ -77,7 +86,7 @@ assert.equal((await response.json()).data.publicUrl, replaced.data.publicUrl);
 
 response = await fetch(endpoint, { method: 'DELETE', headers: { authorization: 'Bearer test-token' } });
 assert.equal(response.status, 200);
-assert.equal(tunnels[0].stopped, true);
+assert.equal(tunnels[1].stopped, true);
 response = await fetch(endpoint, { headers: { authorization: 'Bearer test-token' } });
 assert.equal(response.status, 404);
 
