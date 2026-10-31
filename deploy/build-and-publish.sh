@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+exec {RESULT_FD}>&1
+
 usage() {
   cat >&2 <<'USAGE'
 Usage: build-and-publish.sh <public-https-git-url> <branch> <dockerhub-repository> [build-context] [dockerfile]
@@ -8,6 +10,8 @@ Usage: build-and-publish.sh <public-https-git-url> <branch> <dockerhub-repositor
 Builds the branch tip and pushes <dockerhub-repository>:<commit-sha>.
 Paths are relative to the repository root and default to . and Dockerfile.
 Authenticate with `docker login` first.
+The image tag identifies the source commit; a returned digest identifies the
+specific image content published for that tag.
 USAGE
 }
 
@@ -79,7 +83,7 @@ handle_signal() {
     CHILD_PID=
   fi
   cleanup
-  emit_result failure interrupted "pipeline interrupted by SIG${signal}"
+  emit_result failure interrupted "pipeline interrupted by SIG${signal}" >&"$RESULT_FD"
   exit "$exit_status"
 }
 
