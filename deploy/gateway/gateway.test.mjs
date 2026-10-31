@@ -144,7 +144,7 @@ await assert.rejects(
   manager.reconcile(async () => { throw new Error('control plane unavailable'); }),
   (error) => error.code === 'RECONCILIATION_UNAVAILABLE',
 );
-assert.throws(() => manager.get('restored'), /route was not found/);
+assert.equal(manager.get('api-restored').status, 'ready');
 
 assert.throws(() => validateRouteInput({ deploymentId: 'bad/id', upstreamIp: '100.70.86.53', upstreamPort: 80 }), /safe route identifier/);
 assert.throws(() => validateRouteInput({ deploymentId: 'demo', upstreamIp: '127.0.0.1', upstreamPort: 80 }), /Tailscale IPv4/);

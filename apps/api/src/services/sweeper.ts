@@ -2,6 +2,7 @@ import { eq, and, or, lt, inArray } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { workerNodes, deployments, deploymentEvents } from '../db/schema.js';
 import { removeWorkerFromCache } from '../cache/redis.js';
+import { reconcileGatewayRoutes } from './gateway-reconciliation.js';
 
 export interface SweepResult {
   offlineWorkers: string[];
@@ -178,6 +179,7 @@ export async function sweepWorkerHealth(): Promise<SweepResult> {
 }
 
 let sweeperIntervalId: NodeJS.Timeout | null = null;
+let sweeperTickRunning = false;
 
 /**
  * Starts the periodic background sweeper.
@@ -192,10 +194,17 @@ export function startSweeper(intervalMs: number = SWEEPER_INTERVAL_MS): void {
   );
 
   sweeperIntervalId = setInterval(async () => {
+    if (sweeperTickRunning) return;
+    sweeperTickRunning = true;
     try {
       await sweepWorkerHealth();
+      // Reconcile on every tick so a gateway restart, tunnel URL replacement,
+      // or transient publication failure converges without a new deploy.
+      await reconcileGatewayRoutes();
     } catch (err) {
       console.error('[Sweeper] Background tick execution error:', err);
+    } finally {
+      sweeperTickRunning = false;
     }
   }, intervalMs);
 
@@ -212,6 +221,7 @@ export function stopSweeper(): void {
   if (sweeperIntervalId) {
     clearInterval(sweeperIntervalId);
     sweeperIntervalId = null;
+    sweeperTickRunning = false;
     console.log('[Sweeper] Heartbeat sweeper stopped.');
   }
 }
