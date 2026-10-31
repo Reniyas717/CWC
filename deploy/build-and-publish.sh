@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+exec {RESULT_FD}>&1
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage: build-and-publish.sh <public-https-git-url> <branch> <dockerhub-repository> [build-context] [dockerfile]
+
+Builds the branch tip and pushes <dockerhub-repository>:<commit-sha>.
+Paths are relative to the repository root and default to . and Dockerfile.
+Authenticate with `docker login` first.
+The image tag identifies the source commit; a returned digest identifies the
+specific image content published for that tag.
+USAGE
+}
+
+json_escape() {
+  local value=${1-}
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
+
+emit_result() {
+  local status=$1 stage=$2 message=${3-}
+  local result="{\"status\":\"$(json_escape "$status")\",\"stage\":\"$(json_escape "$stage")\""
+  if [[ -n ${COMMIT_SHA:-} ]]; then
+    result+=",\"commit_sha\":\"$(json_escape "$COMMIT_SHA")\""
+  fi
+  if [[ -n ${IMAGE_REF:-} ]]; then
+    result+=",\"image\":\"$(json_escape "$IMAGE_REF")\""
+  fi
+  if [[ -n ${DIGEST:-} ]]; then
+    result+=",\"digest\":\"$(json_escape "$DIGEST")\""
+  fi
+  if [[ -n $message ]]; then
+    result+=",\"error\":\"$(json_escape "$message")\""
+  fi
+  printf '%s}\n' "$result"
+}
+
+log() {
+  printf '[git-to-image] %s\n' "$*" >&2
+}
+
+fail() {
+  local stage=$1 message=$2
+  log "failed during ${stage}: ${message}"
+  emit_result failure "$stage" "$message"
+  exit 1
+}
+
+cleanup() {
+  if [[ -n ${WORK_DIR:-} && -d ${WORK_DIR:-} ]]; then
+    rm -rf -- "$WORK_DIR"
+  fi
+}
+
+CHILD_PID=
+
+run_child() {
+  local status=0
+  "$@" &
+  CHILD_PID=$!
+  wait "$CHILD_PID" || status=$?
+  CHILD_PID=
+  return "$status"
+}
+
+handle_signal() {
+  local signal=$1 exit_status=130
+  [[ $signal == TERM ]] && exit_status=143
+
+  trap - EXIT INT TERM
+  log "received SIG${signal}; stopping active command and cleaning up"
+  if [[ -n ${CHILD_PID:-} ]] && kill -0 "$CHILD_PID" 2>/dev/null; then
+    kill -TERM "$CHILD_PID" 2>/dev/null || true
+    wait "$CHILD_PID" 2>/dev/null || true
+    CHILD_PID=
+  fi
+  cleanup
+  emit_result failure interrupted "pipeline interrupted by SIG${signal}" >&"$RESULT_FD"
+  exit "$exit_status"
+}
+
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
+trap cleanup EXIT
+
+if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $# -lt 3 || $# -gt 5 ]]; then
+  usage
+  emit_result failure arguments "expected a Git URL, branch, Docker Hub repository, and optional build paths"
+  exit 2
+fi
+
+REPOSITORY_URL=$1
+BRANCH=$2
+DOCKERHUB_REPOSITORY=$3
+BUILD_CONTEXT=${4:-.}
+DOCKERFILE=${5:-Dockerfile}
+
+validate_repository_url() {
+  local authority host port octet private_ip
+  if [[ ! $REPOSITORY_URL =~ ^https://([^/]+)(/.+) ]]; then
+    return 1
+  fi
+
+  authority=${BASH_REMATCH[1]}
+  [[ $authority != *'@'* ]] || return 1
+
+  if [[ $authority == \[*\]:* ]]; then
+    host=${authority#\[}
+    host=${host%%\]*}
+    port=${authority#*\]:}
+    [[ -z $port || $port =~ ^[0-9]+$ ]] || return 1
+    host=${host,,}
+    case "$host" in
+      ::1|::|fc*|fd*|fe8*|fe9*|fea*|feb*) return 1 ;;
+    esac
+  else
+    host=$authority
+    if [[ $host == *:* ]]; then
+      port=${host##*:}
+      host=${host%:*}
+      [[ $port =~ ^[0-9]+$ ]] || return 1
+    fi
+    [[ -n $host && $host != *[[:space:]]* ]] || return 1
+    host=${host,,}
+    case "$host" in
+      localhost|localhost.*|*.localhost|127.*|10.*|192.168.*|169.254.*|0.0.0.0) return 1 ;;
+      172.[1][6-9].*|172.[2][0-9].*|172.[3][0-1].*) return 1 ;;
+    esac
+    if [[ $host =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+      IFS=. read -r -a octets <<< "$host"
+      for octet in "${octets[@]}"; do
+        (( 10#$octet <= 255 )) || return 1
+      done
+      private_ip=$((10#${octets[0]} == 10 || 10#${octets[0]} == 127 || 10#${octets[0]} == 0))
+      (( private_ip == 0 )) || return 1
+    fi
+  fi
+  [[ -n $host ]]
+}
+
+if ! validate_repository_url; then
+  emit_result failure validation "repository URL must be a public HTTPS Git URL without credentials or private host literals"
+  exit 2
+fi
+if [[ -z $BRANCH || $BRANCH == -* ]]; then
+  emit_result failure validation "branch must be a non-empty name"
+  exit 2
+fi
+if [[ ! $DOCKERHUB_REPOSITORY =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+  emit_result failure validation "Docker Hub repository must have the form owner/name"
+  exit 2
+fi
+if [[ $BUILD_CONTEXT == /* || $DOCKERFILE == /* ]]; then
+  emit_result failure validation "build paths must be relative to the repository root"
+  exit 2
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  emit_result failure prerequisites "git is not installed"
+  exit 1
+fi
+ensure_docker_daemon() {
+  if docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
+    log "Docker daemon is ready"
+    return 0
+  fi
+
+  log "Docker daemon is unavailable; attempting to start it"
+  local started=1
+  if command -v systemctl >/dev/null 2>&1; then
+    if sudo systemctl start docker >&2; then
+      started=0
+    fi
+  fi
+  if (( started != 0 )) && command -v service >/dev/null 2>&1; then
+    if sudo service docker start >&2; then
+      started=0
+    fi
+  fi
+  if (( started != 0 )); then
+    return 1
+  fi
+
+  log "waiting for Docker daemon readiness"
+  if docker info >/dev/null 2> >(sed 's/^/[docker] /' >&2); then
+    return 0
+  fi
+  return 2
+}
+
+WORK_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cwc-build.XXXXXX")
+log "cloning ${REPOSITORY_URL} (branch ${BRANCH})"
+if ! run_child git clone --depth 1 --single-branch --branch "$BRANCH" "$REPOSITORY_URL" "$WORK_DIR" >&2; then
+  fail clone "unable to clone the requested branch"
+fi
+
+if ! COMMIT_SHA=$(git -C "$WORK_DIR" rev-parse HEAD 2> >(sed 's/^/[git] /' >&2)); then
+  fail checkout "unable to resolve the checked-out commit"
+fi
+if [[ ! $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]]; then
+  fail checkout "git returned an invalid commit SHA"
+fi
+
+resolve_repo_path() {
+  local relative_path=$1 resolved_path
+  if ! resolved_path=$(realpath -e -- "$WORK_DIR/$relative_path" 2> >(sed 's/^/[path] /' >&2)); then
+    fail validation "path does not exist: ${relative_path}"
+  fi
+  case "$resolved_path" in
+    "$WORK_DIR"|"$WORK_DIR"/*) RESOLVED_REPO_PATH=$resolved_path ;;
+    *) fail validation "path escapes the repository checkout: ${relative_path}" ;;
+  esac
+}
+
+resolve_repo_path "$BUILD_CONTEXT"
+BUILD_CONTEXT_PATH=$RESOLVED_REPO_PATH
+resolve_repo_path "$DOCKERFILE"
+DOCKERFILE_PATH=$RESOLVED_REPO_PATH
+if [[ ! -d $BUILD_CONTEXT_PATH ]]; then
+  fail validation "build context is not a directory: ${BUILD_CONTEXT}"
+fi
+if [[ ! -f $DOCKERFILE_PATH ]]; then
+  fail validation "Dockerfile is not a regular file: ${DOCKERFILE}"
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+  emit_result failure prerequisites "docker is not installed"
+  exit 1
+fi
+
+if ensure_docker_daemon; then
+  :
+else
+  startup_status=$?
+  if (( startup_status == 2 )); then
+    fail docker-readiness "Docker daemon did not become ready"
+  fi
+  fail docker-start "unable to start the Docker daemon"
+fi
+
+IMAGE_REF="${DOCKERHUB_REPOSITORY}:${COMMIT_SHA}"
+log "building ${IMAGE_REF}"
+if ! run_child docker build --tag "$IMAGE_REF" --file "$DOCKERFILE_PATH" "$BUILD_CONTEXT_PATH" >&2; then
+  fail build "Docker image build failed"
+fi
+
+log "pushing ${IMAGE_REF}"
+if ! run_child docker push "$IMAGE_REF" >&2; then
+  fail push "Docker Hub push failed"
+fi
+
+if DIGEST_REFERENCE=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_REF" 2> >(sed 's/^/[docker] /' >&2)); then
+  if [[ $DIGEST_REFERENCE == *@* ]]; then
+    DIGEST=${DIGEST_REFERENCE##*@}
+  elif [[ $DIGEST_REFERENCE =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    DIGEST=$DIGEST_REFERENCE
+  else
+    DIGEST=
+  fi
+else
+  DIGEST=
+fi
+
+log "published ${IMAGE_REF}"
+emit_result success complete

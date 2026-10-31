@@ -13,12 +13,18 @@ Developers frequently spend money on hyperscaler cloud virtual machines (EC2, dr
 **Cloud Without Clouds** federates these personal devices into an encrypted, distributed compute cluster:
 - Users submit a public Git repository containing a `Dockerfile`.
 - The **Control Plane** validates the request and schedules the deployment.
-- The **Worker Agent** clones the code, builds the container image, and launches the container under strict CPU and memory limits.
+- The standalone **Git-to-image pipeline** clones a public branch, builds its Dockerfile, and publishes a commit-tagged image to public Docker Hub. The future **Worker Agent** integration pulls that image and launches it under strict CPU and memory limits.
 - Traffic flows to the application container via an edge ingress proxy and a private **Tailscale** overlay network.
 
 ### Scope Distinction: Minimum MVP vs. Target Capabilities
 - **Minimum MVP Requirement:** Deploying **one** public Git repository containing a Dockerfile onto **one** worker laptop, executing it inside a Docker container under hardcoded CPU and memory caps, and exposing it through an accessible URL (using Cloudflare Tunnel, or a zero-cost Quick Tunnel / Tailscale fallback).
 - **Target Capabilities (Planned for Milestone 2):** Multi-worker registration and heartbeats, resource-aware scheduler placement (preferring the least-loaded eligible worker), worker heartbeat lease tracking, and automatic redeployment of workloads onto another healthy worker upon node failure.
+
+### Standalone Git-to-image pipeline
+
+The deployment workstream provides a command-line build boundary in `deploy/build-and-publish.sh`. It accepts a public HTTPS Git URL, a branch, a Docker Hub repository, and optional repository-relative build paths. It resolves the branch tip to a full commit SHA, builds for the local Linux architecture, pushes `<repository>:<commit-sha>` to Docker Hub, streams logs to stderr, and returns a JSON result on stdout. The pushed digest is returned when Docker reports one.
+
+This pipeline is currently standalone. The worker task poller and control plane do not invoke it yet; their existing clone/build lifecycle remains a future integration point. Workers that consume its images must use a compatible architecture and can pull by the SHA tag or digest.
 
 ```mermaid
 flowchart TD
@@ -141,7 +147,7 @@ graph LR
 
 ### 5. Worker Agent Daemon (`apps/worker`)
 - **Technology:** Node.js (ESM), TypeScript, Zod, native `os` APIs.
-- **Responsibilities:** Runs as a host daemon on developer laptops. Measures host CPU load and available RAM, connects to the control plane, polls deployment tasks, performs `git clone`, triggers `docker build`, and monitors running containers.
+- **Responsibilities:** Runs as a host daemon on developer laptops. Measures host CPU load and available RAM, connects to the control plane, polls deployment tasks, pulls a published image from Docker Hub in the integrated flow, and monitors running containers. The current worker build engine remains a placeholder; the standalone clone/build/publish boundary is documented above.
 - **Trust Boundary:** Semi-trusted execution host. Authenticates using `WORKER_SECRET_TOKEN`. Reported resource usage is sanity-checked by the control plane.
 - **Implementation Status:** Host metric collection (`WorkerHealthMonitor`), configuration parser (`workerEnv`), and Docker initialization stub implemented. Heartbeat transmission and Docker build engine are placeholders.
 
@@ -204,9 +210,9 @@ sequenceDiagram
     end
 
     Worker->>API: POST /api/v1/workers/status (state: "busy")
-    Worker->>Worker: git clone --depth 1 <repositoryUrl> /tmp/cwc-builds/<depId>
-    Worker->>Docker: docker build -t cwc-<depId>:v1 .
-    Docker-->>Worker: Image Build Successful
+    Note over Worker,Docker: Future integration may invoke the standalone pipeline or an equivalent worker lifecycle
+    Worker->>DockerHub: docker pull <repository>:<commit-sha>
+    DockerHub-->>Worker: Image Available
 
     Worker->>Docker: docker run -d --name cwc-<depId> -p <workerPort>:<appPort> --memory=512m --cpus=1.0 --pids-limit=256
     Docker-->>Worker: Container Started (ContainerId: cid-12345)
@@ -686,7 +692,8 @@ $$S(W) = \left( 0.4 \times \frac{W.\text{resources.usedMemoryMb}}{W.\text{resour
 | Control Plane Base API & /health | ✅ Yes | ✅ Yes | ✅ Yes | - |
 | Worker Host Metrics & Stubs | ✅ Yes | ✅ Yes | ✅ Yes | - |
 | Frontend Shell & Navigation | ✅ Yes | ✅ Yes | ✅ Yes | - |
-| Single Worker Git Clone & Docker Build | ❌ No | ✅ Yes | ✅ Yes | - |
+| Git-to-Docker Hub Build Pipeline | ✅ Yes (`deploy/build-and-publish.sh`) | ✅ Yes | ✅ Yes | - |
+| Single Worker Image Pull & Container Run | ❌ No | ✅ Yes | ✅ Yes | - |
 | Container Port Binding & CPU/Mem Capping | ❌ No | ✅ Yes | ✅ Yes | - |
 | Platform URL via Cloudflare/Quick Tunnel | ❌ No | ✅ Yes | ✅ Yes | - |
 | Web Deployment Creation UI | ❌ No | ✅ Yes | ✅ Yes | - |
@@ -720,7 +727,7 @@ All foundational architectural decisions have been formally resolved for the hac
 - **Workflow:**
   1. Worker polls `GET /api/v1/workers/:id/tasks` every 2–5 seconds (or inspects the heartbeat response).
   2. If a deployment task is pending, the worker receives a `DeploymentTaskPayload` (deployment ID, git URL, branch, port, resource caps).
-  3. Worker acknowledges receipt, sets status to `building`, clones repository to `/tmp/cwc-builds/<depId>`, executes `docker build`, and starts the container.
+  3. The standalone pipeline clones the requested branch, builds the Dockerfile, and publishes `<repository>:<commit-sha>` to Docker Hub. Future worker integration acknowledges receipt, pulls that image, and starts the container.
   4. Worker reports results (`containerId`, `assignedPort`, `status: running | failed`) via `POST /api/v1/internal/deployments/:id/result`.
 - **Infrastructure:** Zero additional message broker needed for MVP; Redis remains available in `docker-compose.yml` for target BullMQ queues.
 
