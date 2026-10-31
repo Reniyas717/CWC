@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { eq, desc, or, asc } from 'drizzle-orm';
+import { eq, desc, or, asc, and, gte } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import {
@@ -163,11 +163,17 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
     let assignedWorkerId = payload.workerId;
 
     if (!assignedWorkerId) {
-      // Find candidate worker that is currently idle or busy
+      const activeHeartbeatCutoff = new Date(Date.now() - 30_000);
+      // Find candidate worker that is currently idle or busy with a valid heartbeat (<30s)
       const eligibleWorkers = await db
         .select()
         .from(workerNodes)
-        .where(or(eq(workerNodes.state, 'idle'), eq(workerNodes.state, 'busy')))
+        .where(
+          and(
+            or(eq(workerNodes.state, 'idle'), eq(workerNodes.state, 'busy')),
+            gte(workerNodes.lastHeartbeatAt, activeHeartbeatCutoff)
+          )
+        )
         .orderBy(asc(workerNodes.activeContainers))
         .limit(1);
 

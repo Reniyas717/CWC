@@ -348,3 +348,73 @@ In **Phase 4**, we implemented the core orchestration lifecycle for deployments 
    - `pnpm check-types`: 0 errors across all 4 monorepo packages.
    - `pnpm lint`: 0 ESLint errors.
    - `pnpm --filter @cloud-without-clouds/api build`: Compiled ESM bundle successfully.
+
+
+---
+
+# Changes & Implementation Log: Phase 5 — Heartbeat Sweeper & Worker Failure Detection / Recovery Engine
+
+## 1. Overview & Objectives
+
+In **Phase 5**, we implemented the automated node health supervision and failover recovery engine for the Control Plane API (`apps/api`), adhering to Section 3 of `AGENTS.md` and Sections 9 & 13 of `ARCHITECTURE.md`:
+- Continuous heartbeat timeout detection ($>30$ seconds) across all active worker laptops.
+- Automated state transition of non-responsive workers to `'offline'`, zeroing active containers and purging ephemeral Redis leases (`worker:last_seen:<workerId>`).
+- Workload recovery engine: automatic failover of in-flight deployments (`queued`, `building`, `deploying`, `running`) off of failed worker nodes.
+- Retry-budgeted auto-rescheduling back to `'queued'` state (unassigning the dead worker and incrementing `retry_count` up to 3).
+- Retry exhaustion protection: transitions deployments to `'failed'` with descriptive audit events once 3 failover attempts have been exhausted.
+- Safe candidate worker selection in `POST /api/v1/deployments` ensuring workers with stale heartbeats ($>30$s) are never assigned new workloads.
+- Background sweeper daemon running every 10 seconds (`apps/api/src/services/sweeper.ts`) wired to server startup and graceful shutdown hooks (`apps/api/src/index.ts`).
+- Deterministic administrative sweep trigger endpoint (`POST /api/v1/workers/sweep`).
+
+---
+
+## 2. Core Architecture & Modules Implemented
+
+### 1. Heartbeat Sweeper Service (`apps/api/src/services/sweeper.ts`)
+- **`sweepWorkerHealth(): Promise<SweepResult>`**:
+  - Computes cutoff timestamp: `now - 30 seconds`.
+  - Queries `worker_nodes` where state is active (`idle`, `busy`, or `error`) and `last_heartbeat_at < cutoff`.
+  - Transitions matching nodes to `state = 'offline'` and sets `active_containers = 0`.
+  - Purges Redis lease via `removeWorkerFromCache(workerId)`.
+  - Queries all non-terminal deployments assigned to the failed worker (`queued`, `building`, `deploying`, `running`).
+  - **Queued Tasks:** Unassigns worker (`workerId = null`), keeps state `'queued'`, emits `RESCHEDULED` event.
+  - **In-Flight Tasks (`building`, `deploying`, `running`):**
+    - If `retryCount < 3`: Increments `retryCount`, clears runtime properties (`containerId = null`, `assignedPort = null`, `publicUrl = null`, `workerId = null`), sets state `'queued'`, emits `RESCHEDULED` event with recovery attempt details (`attempt N/3`).
+    - If `retryCount >= 3`: Sets state `'failed'`, sets `errorMessage`, sets `finishedAt`, emits `FAILED` event detailing retry exhaustion.
+  - Returns structured `SweepResult` with lists of `offlineWorkers`, `rescheduledDeployments`, and `failedDeployments`.
+- **`startSweeper(intervalMs = 10000)` & `stopSweeper()`**:
+  - Manages background interval with `.unref()` to avoid blocking test runners or process shutdowns.
+
+### 2. Server Lifecycle Integration (`apps/api/src/index.ts`)
+- Calls `startSweeper()` on API server startup.
+- Calls `stopSweeper()` cleanly on `SIGTERM` and `SIGINT` signals.
+
+### 3. Safe Worker Allocation (`apps/api/src/routes/deployments.ts`)
+- Updated worker selection query in `POST /api/v1/deployments` to enforce `gte(workerNodes.lastHeartbeatAt, cutoff)`.
+- Prevents dead or stale workers from being assigned new workloads.
+
+### 4. Admin Trigger Endpoint (`apps/api/src/routes/workers.ts`)
+- **`POST /api/v1/workers/sweep`** (`optionalAdmin`):
+  - Allows administrative dashboards, monitoring systems, and test harnesses to execute an immediate on-demand health sweep.
+
+---
+
+## 3. Verification & Quality Assurance
+
+1. **Dedicated Phase 5 Test Suite (`apps/api/test-phase5.js`)**:
+   - 25 automated assertions verified against live API, PostgreSQL 16, and Redis:
+     - **Test 1:** Verified healthy workers with recent heartbeats are unaffected by sweeper.
+     - **Test 2:** Simulated dead worker ($>30$s inactivity), verified sweeper marks state `'offline'`, resets `active_containers` to 0, and purges Redis lease.
+     - **Test 3:** Simulated worker failure during running container execution; verified deployment auto-rescheduled to `'queued'`, `worker_id` unassigned, runtime ports/containers cleared, `retry_count` incremented to 1, and `RESCHEDULED` event logged.
+     - **Test 4:** Verified a fresh healthy worker immediately receives and locks the rescheduled deployment via `GET /api/v1/workers/:id/tasks` (failover pickup).
+     - **Test 5:** Simulated retry limit exhaustion (3 prior retries); verified deployment transitioned to `'failed'` with error message, `finished_at` timestamp, and `FAILED` event logged.
+   - Result: **25 passed, 0 failed**.
+
+2. **Regression Verification**:
+   - `apps/api/test-auth.js`: **28 passed, 0 failed**.
+   - `apps/api/test-phase4.js`: **18 passed, 0 failed**.
+
+3. **Type Checking, Linting & Build**:
+   - `pnpm check-types`: **0 errors** across all packages.
+   - `pnpm lint`: **0 ESLint errors** across all packages.
+   - `pnpm --filter @cloud-without-clouds/api build`: Compiled ESM bundle cleanly.

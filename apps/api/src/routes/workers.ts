@@ -19,6 +19,7 @@ import {
   recordWorkerHeartbeatInCache,
   removeWorkerFromCache,
 } from '../cache/redis.js';
+import { sweepWorkerHealth } from '../services/sweeper.js';
 
 export const workersRouter: Router = Router();
 
@@ -109,6 +110,31 @@ workersRouter.get('/:id', optionalAdmin, async (req: Request, res: Response) => 
       error: {
         code: 'DATABASE_ERROR',
         message: 'Failed to retrieve worker node',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/workers/sweep
+ * Triggers a worker health check and failure recovery sweep across all registered nodes.
+ * Guarded by optionalAdmin.
+ */
+workersRouter.post('/sweep', optionalAdmin, async (_req: Request, res: Response) => {
+  try {
+    const result = await sweepWorkerHealth();
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: 'Worker health sweep executed successfully',
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SWEEP_FAILED',
+        message: 'Failed to execute worker health sweep',
         details: error instanceof Error ? error.message : String(error),
       },
     });
