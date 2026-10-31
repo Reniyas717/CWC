@@ -13,7 +13,11 @@
     "db:migrate": "tsx --env-file=../../.env src/db/migrate.ts",
     "test:auth": "node test-auth.js",
     "check-types": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "test:phase4": "node test-phase4.js",
+    "test:phase5": "node test-phase5.js",
+    "test:phase6": "node test-phase6.js",
+    "test:all": "node test-auth.js && node test-phase4.js && node test-phase5.js && node test-phase6.js"
   },
   "dependencies": {
     "@cloud-without-clouds/shared": "workspace:*",

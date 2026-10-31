@@ -349,7 +349,6 @@ deploymentsRouter.get('/:id/logs', optionalAdmin, async (req: Request, res: Resp
  */
 deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const now = new Date();
 
   try {
     const existing = await db.select().from(deployments).where(eq(deployments.id, id));
@@ -380,6 +379,8 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       });
       return;
     }
+
+    const now = new Date();
 
     await db
       .update(deployments)
@@ -412,6 +413,64 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       error: {
         code: 'CANCEL_FAILED',
         message: 'Failed to cancel deployment',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * DELETE /api/v1/deployments/:id
+ * Deletes a deployment record and cleans up associated Gateway routes.
+ * Requires ADMIN_TOKEN.
+ */
+deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const existing = await db.select().from(deployments).where(eq(deployments.id, id));
+
+    if (existing.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: `Deployment '${id}' not found`,
+        },
+      });
+      return;
+    }
+
+    const current = existing[0];
+
+    // Remove route from Gateway idempotently
+    await gatewayClient.removeRoute(id);
+
+    // Guard against deleting active workloads without stopping them first
+    if (current.state === 'running' || current.state === 'building' || current.state === 'queued') {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'ACTIVE_DEPLOYMENT',
+          message: `Cannot delete active deployment '${id}' in state '${current.state}'. Please cancel the deployment first.`,
+        },
+      });
+      return;
+    }
+
+    // Delete record from database (foreign key cascade removes logs and events)
+    await db.delete(deployments).where(eq(deployments.id, id));
+
+    res.status(200).json({
+      success: true,
+      message: 'Deployment deleted successfully',
+      deploymentId: id,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'DELETE_FAILED',
+        message: 'Failed to delete deployment',
         details: error instanceof Error ? error.message : String(error),
       },
     });

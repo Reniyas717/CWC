@@ -7,7 +7,7 @@ import {
 } from '@cloud-without-clouds/shared';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'cwc-admin-token-super-secret-dev';
+const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'dev-admin-token-change-in-production';
 
 const STORAGE_KEY_APPS = 'cwc_applications_registry_v1';
 const STORAGE_KEY_DEPS = 'cwc_deployments_registry_v1';
@@ -119,7 +119,11 @@ const INITIAL_DEPLOYMENTS: Deployment[] = [
   },
 ];
 
-function generateRealisticLogs(depId: string, branch = 'main', hash = 'f4b98c2'): DeploymentLogEntry[] {
+function generateRealisticLogs(
+  depId: string,
+  branch = 'main',
+  hash = 'f4b98c2'
+): DeploymentLogEntry[] {
   const baseTime = Date.now() - 60000;
   return [
     {
@@ -416,9 +420,12 @@ export const api = {
    */
   async getDeploymentLogs(deploymentId: string): Promise<DeploymentLogEntry[]> {
     try {
-      const res = await fetch(`${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/logs`, {
-        headers: this.getAuthHeaders(),
-      });
+      const res = await fetch(
+        `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/logs`,
+        {
+          headers: this.getAuthHeaders(),
+        }
+      );
       if (res.ok) {
         const json = await res.json();
         if (Array.isArray(json?.data) && json.data.length > 0) {
@@ -436,15 +443,20 @@ export const api = {
    */
   async cancelDeployment(deploymentId: string): Promise<boolean> {
     try {
-      const res = await fetch(`${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/cancel`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
+      const res = await fetch(
+        `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/cancel`,
+        {
+          method: 'POST',
+          headers: this.getAuthHeaders(),
+        }
+      );
       if (res.ok) {
         // Also update local cache
         const deps = loadLocalDeployments();
         const updated = deps.map((d) =>
-          d.id === deploymentId ? { ...d, state: 'cancelled' as const, finishedAt: new Date().toISOString() } : d
+          d.id === deploymentId
+            ? { ...d, state: 'cancelled' as const, finishedAt: new Date().toISOString() }
+            : d
         );
         saveLocalDeployments(updated);
         return true;
@@ -456,7 +468,9 @@ export const api = {
     // Local fallback update
     const deps = loadLocalDeployments();
     const updated = deps.map((d) =>
-      d.id === deploymentId ? { ...d, state: 'cancelled' as const, finishedAt: new Date().toISOString() } : d
+      d.id === deploymentId
+        ? { ...d, state: 'cancelled' as const, finishedAt: new Date().toISOString() }
+        : d
     );
     saveLocalDeployments(updated);
 
@@ -467,10 +481,14 @@ export const api = {
       timestamp: new Date().toISOString(),
       level: 'warn',
       stream: 'system',
-      message: '[ControlPlane] Deployment cancelled by operator. Container teardown signal dispatched.',
+      message:
+        '[ControlPlane] Deployment cancelled by operator. Container teardown signal dispatched.',
     };
     try {
-      localStorage.setItem(`${STORAGE_KEY_LOGS}_${deploymentId}`, JSON.stringify([...existingLogs, cancelLog]));
+      localStorage.setItem(
+        `${STORAGE_KEY_LOGS}_${deploymentId}`,
+        JSON.stringify([...existingLogs, cancelLog])
+      );
     } catch {
       // ignore
     }
@@ -629,7 +647,8 @@ export const api = {
     return workers.map((w) => {
       const memRatio = (w.resources?.usedMemoryMb ?? 0) / (w.resources?.totalMemoryMb ?? 1);
       const cpuRatio = (w.resources?.cpuUsagePercent ?? 0) / 100;
-      const contRatio = (w.resources?.activeContainers ?? 0) / (w.limits?.maxConcurrentWorkloads ?? 4);
+      const contRatio =
+        (w.resources?.activeContainers ?? 0) / (w.limits?.maxConcurrentWorkloads ?? 4);
       const score = Number((0.4 * memRatio + 0.4 * cpuRatio + 0.2 * contRatio).toFixed(4));
 
       return {

@@ -1,8 +1,5 @@
 import os from 'os';
-import {
-  WorkerHeartbeat,
-  WorkerRegistration,
-} from '@cloud-without-clouds/shared';
+import { WorkerHeartbeat, WorkerRegistration } from '@cloud-without-clouds/shared';
 import { workerConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { ControlPlaneClient } from './services/control-plane-client.js';
@@ -20,6 +17,23 @@ let isShuttingDown = false;
 let isRegistered = false;
 let taskPoller: TaskPoller | null = null;
 let dockerEngine: DockerEngine | null = null;
+
+function resolveWorkerIp(): string {
+  if (process.env.TAILSCALE_IP) return process.env.TAILSCALE_IP;
+  const interfaces = os.networkInterfaces();
+  for (const ifaceList of Object.values(interfaces)) {
+    if (!ifaceList) continue;
+    for (const iface of ifaceList) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        const parts = iface.address.split('.').map(Number);
+        if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) {
+          return iface.address;
+        }
+      }
+    }
+  }
+  return '127.0.0.1';
+}
 
 async function bootstrap() {
   logger.info('==================================================');
@@ -82,6 +96,7 @@ async function bootstrap() {
     id: workerConfig.WORKER_ID,
     name: workerConfig.WORKER_NAME,
     hostname: os.hostname(),
+    ipAddress: resolveWorkerIp(),
     port: workerConfig.WORKER_PORT,
     authToken: workerConfig.WORKER_SECRET_TOKEN,
     resources: initialResources,
@@ -155,9 +170,7 @@ async function bootstrap() {
           `Heartbeat endpoint returned HTTP ${res.statusCode} (endpoint pending on Control Plane)`
         );
       } else {
-        logger.warn(
-          `Heartbeat report failed: ${res.error || `HTTP ${res.statusCode}`}`
-        );
+        logger.warn(`Heartbeat report failed: ${res.error || `HTTP ${res.statusCode}`}`);
       }
     } catch (err: unknown) {
       logger.error('Unexpected error during heartbeat execution', err);

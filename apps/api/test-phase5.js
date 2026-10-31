@@ -9,11 +9,22 @@
  */
 
 import pg from 'pg';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config();
 
 const base = process.env.API_BASE_URL || 'http://localhost:4000';
 const adminToken = process.env.ADMIN_TOKEN || 'dev-admin-token-change-in-production';
-const workerToken = process.env.WORKER_SECRET_TOKEN || 'dev-worker-secret-token-change-in-production';
-const databaseUrl = process.env.DATABASE_URL || 'postgresql://cwc_user:cwc_password@localhost:5432/cloud_without_clouds?schema=public';
+const workerToken =
+  process.env.WORKER_SECRET_TOKEN || 'dev-worker-secret-token-change-in-production';
+const databaseUrl =
+  process.env.DATABASE_URL ||
+  'postgresql://cwc_user:cwc_password@localhost:5432/cloud_without_clouds?schema=public';
 
 const adminHeaders = {
   Authorization: `Bearer ${adminToken}`,
@@ -78,10 +89,18 @@ async function runPhase5Tests() {
       headers: adminHeaders,
     });
     const sweepJson1 = await sweepRes1.json();
-    assert(sweepRes1.status === 200 && sweepJson1.success === true, 'Sweep endpoint executed successfully');
-    assert(!sweepJson1.data.offlineWorkers.includes(healthyWorkerId), 'Healthy worker was NOT marked offline');
+    assert(
+      sweepRes1.status === 200 && sweepJson1.success === true,
+      'Sweep endpoint executed successfully'
+    );
+    assert(
+      !sweepJson1.data.offlineWorkers.includes(healthyWorkerId),
+      'Healthy worker was NOT marked offline'
+    );
 
-    const checkHealthy = await pool.query('SELECT state FROM worker_nodes WHERE id = $1', [healthyWorkerId]);
+    const checkHealthy = await pool.query('SELECT state FROM worker_nodes WHERE id = $1', [
+      healthyWorkerId,
+    ]);
     assert(checkHealthy.rows[0].state === 'idle', 'Healthy worker state remains idle in DB');
 
     // -------------------------------------------------------------------------
@@ -113,16 +132,25 @@ async function runPhase5Tests() {
 
     // Age last_heartbeat_at to 45 seconds ago
     const pastTime = new Date(Date.now() - 45_000);
-    await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1 WHERE id = $2', [pastTime, deadWorkerId]);
+    await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1 WHERE id = $2', [
+      pastTime,
+      deadWorkerId,
+    ]);
 
     const sweepRes2 = await fetch(`${base}/api/v1/workers/sweep`, {
       method: 'POST',
       headers: adminHeaders,
     });
     const sweepJson2 = await sweepRes2.json();
-    assert(sweepJson2.data.offlineWorkers.includes(deadWorkerId), `Worker '${deadWorkerId}' detected as offline in sweep results`);
+    assert(
+      sweepJson2.data.offlineWorkers.includes(deadWorkerId),
+      `Worker '${deadWorkerId}' detected as offline in sweep results`
+    );
 
-    const checkDead = await pool.query('SELECT state, active_containers FROM worker_nodes WHERE id = $1', [deadWorkerId]);
+    const checkDead = await pool.query(
+      'SELECT state, active_containers FROM worker_nodes WHERE id = $1',
+      [deadWorkerId]
+    );
     assert(checkDead.rows[0].state === 'offline', 'Worker state in PostgreSQL is now offline');
     assert(checkDead.rows[0].active_containers === 0, 'Worker active_containers reset to 0');
 
@@ -185,7 +213,10 @@ async function runPhase5Tests() {
     });
 
     // Verify deployment is running
-    const checkRunning = await pool.query('SELECT state, retry_count FROM deployments WHERE id = $1', [depId]);
+    const checkRunning = await pool.query(
+      'SELECT state, retry_count FROM deployments WHERE id = $1',
+      [depId]
+    );
     assert(checkRunning.rows[0].state === 'running', 'Deployment initially confirmed running');
     assert(checkRunning.rows[0].retry_count === 0, 'Initial retry_count is 0');
 
@@ -201,8 +232,14 @@ async function runPhase5Tests() {
       headers: adminHeaders,
     });
     const sweepJson3 = await sweepRes3.json();
-    assert(sweepJson3.data.offlineWorkers.includes(workerWithTask), `Dead worker detected in sweep`);
-    assert(sweepJson3.data.rescheduledDeployments.includes(depId), `Deployment '${depId}' was auto-rescheduled`);
+    assert(
+      sweepJson3.data.offlineWorkers.includes(workerWithTask),
+      `Dead worker detected in sweep`
+    );
+    assert(
+      sweepJson3.data.rescheduledDeployments.includes(depId),
+      `Deployment '${depId}' was auto-rescheduled`
+    );
 
     // Verify database state of deployment
     const checkRecovered = await pool.query(
@@ -220,7 +257,10 @@ async function runPhase5Tests() {
       "SELECT event_type, details FROM deployment_events WHERE deployment_id = $1 AND event_type = 'RESCHEDULED'",
       [depId]
     );
-    assert(checkEvents.rows.length > 0, 'RESCHEDULED event successfully recorded in deployment_events');
+    assert(
+      checkEvents.rows.length > 0,
+      'RESCHEDULED event successfully recorded in deployment_events'
+    );
 
     // -------------------------------------------------------------------------
     // TEST 4: Failover Task Pickup by Another Worker
@@ -249,14 +289,28 @@ async function runPhase5Tests() {
       }),
     });
 
-    const rescuePoll = await fetch(`${base}/api/v1/workers/${rescueWorkerId}/tasks`, { headers: workerHeaders });
+    const rescuePoll = await fetch(`${base}/api/v1/workers/${rescueWorkerId}/tasks`, {
+      headers: workerHeaders,
+    });
     const rescueJson = await rescuePoll.json();
     assert(rescueJson.hasTask === true, 'Rescue worker polled and received task');
-    assert(rescueJson.task.deploymentId === depId, 'Received task matches the rescheduled deployment');
+    assert(
+      rescueJson.task.deploymentId === depId,
+      'Received task matches the rescheduled deployment'
+    );
 
-    const checkRescued = await pool.query('SELECT state, worker_id FROM deployments WHERE id = $1', [depId]);
-    assert(checkRescued.rows[0].state === 'building', `Deployment locked to rescue worker with state 'building'`);
-    assert(checkRescued.rows[0].worker_id === rescueWorkerId, `worker_id updated to rescue worker '${rescueWorkerId}'`);
+    const checkRescued = await pool.query(
+      'SELECT state, worker_id FROM deployments WHERE id = $1',
+      [depId]
+    );
+    assert(
+      checkRescued.rows[0].state === 'building',
+      `Deployment locked to rescue worker with state 'building'`
+    );
+    assert(
+      checkRescued.rows[0].worker_id === rescueWorkerId,
+      `worker_id updated to rescue worker '${rescueWorkerId}'`
+    );
 
     // -------------------------------------------------------------------------
     // TEST 5: Max Retry Limit (3) Marks Deployment FAILED
@@ -300,7 +354,9 @@ async function runPhase5Tests() {
     const maxDepId = depMaxJson.data.id;
 
     // Simulate 3 prior retries and running state
-    await pool.query("UPDATE deployments SET retry_count = 3, state = 'running' WHERE id = $1", [maxDepId]);
+    await pool.query("UPDATE deployments SET retry_count = 3, state = 'running' WHERE id = $1", [
+      maxDepId,
+    ]);
 
     // Worker dies
     await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1 WHERE id = $2', [
@@ -314,14 +370,22 @@ async function runPhase5Tests() {
       headers: adminHeaders,
     });
     const sweepJson4 = await sweepRes4.json();
-    assert(sweepJson4.data.failedDeployments.includes(maxDepId), `Deployment '${maxDepId}' identified in failedDeployments`);
+    assert(
+      sweepJson4.data.failedDeployments.includes(maxDepId),
+      `Deployment '${maxDepId}' identified in failedDeployments`
+    );
 
     const checkMaxFailed = await pool.query(
       'SELECT state, error_message, finished_at FROM deployments WHERE id = $1',
       [maxDepId]
     );
     assert(checkMaxFailed.rows[0].state === 'failed', `Deployment state is now 'failed'`);
-    assert(checkMaxFailed.rows[0].error_message.includes('maximum recovery retry limit (3) was exceeded'), 'Error message describes retry exhaustion');
+    assert(
+      checkMaxFailed.rows[0].error_message.includes(
+        'maximum recovery retry limit (3) was exceeded'
+      ),
+      'Error message describes retry exhaustion'
+    );
     assert(checkMaxFailed.rows[0].finished_at !== null, 'finished_at timestamp recorded');
 
     const checkFailedEvent = await pool.query(
@@ -329,7 +393,6 @@ async function runPhase5Tests() {
       [maxDepId]
     );
     assert(checkFailedEvent.rows.length > 0, 'FAILED event logged in deployment_events');
-
   } catch (err) {
     console.error('Fatal test error:', err);
     failed++;
@@ -338,7 +401,9 @@ async function runPhase5Tests() {
   }
 
   console.log('\n==================================================');
-  console.log(`Phase 5 Verification Summary: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+  console.log(
+    `Phase 5 Verification Summary: ${passed} passed, ${failed} failed, ${passed + failed} total`
+  );
   console.log('==================================================');
 
   if (failed > 0) {

@@ -19,7 +19,12 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
-    "infra:logs": "docker compose logs -f"
+    "infra:logs": "docker compose logs -f",
+    "dev:gateway": "node --env-file=.env deploy/gateway/gateway.mjs",
+    "test:worker": "pnpm --filter @cloud-without-clouds/worker test",
+    "test:api": "pnpm --filter @cloud-without-clouds/api test:all",
+    "test:gateway": "node deploy/gateway/gateway.test.mjs",
+    "test:e2e": "node apps/api/test-e2e.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -2,7 +2,8 @@
 
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_CADDY_ADMIN = 'http://127.0.0.1:2019';
@@ -185,8 +186,17 @@ export class QuickTunnel {
 
   async start(listenerPort, { onExit } = {}) {
     let child;
-    const command = process.platform === 'win32' ? 'cloudflared.cmd' : 'cloudflared';
-    const options = process.platform === 'win32' ? { stdio: ['ignore', 'pipe', 'pipe'], shell: true } : { stdio: ['ignore', 'pipe', 'pipe'] };
+    let command = 'cloudflared';
+    let options = { stdio: ['ignore', 'pipe', 'pipe'] };
+    if (process.platform === 'win32') {
+      const nativeBinary = join(process.env.APPDATA || '', 'npm/node_modules/cloudflared/bin/cloudflared.exe');
+      if (existsSync(nativeBinary)) {
+        command = nativeBinary;
+      } else {
+        command = 'cloudflared.cmd';
+        options = { stdio: ['ignore', 'pipe', 'pipe'], shell: true };
+      }
+    }
     try {
       child = this.spawn(command, ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], options);
     } catch (error) {
@@ -209,7 +219,7 @@ export class QuickTunnel {
           url: match[0],
           stop: () => {
             stopped = true;
-            child.kill('SIGTERM');
+            if (process.platform === 'win32' && child?.pid) { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } child?.kill?.('SIGTERM');
           },
         });
       };
@@ -222,7 +232,7 @@ export class QuickTunnel {
       };
       const timeout = setTimeout(() => {
         stopped = true;
-        child.kill('SIGTERM');
+        if (process.platform === 'win32' && child?.pid) { spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); } child?.kill?.('SIGTERM');
         finish(reject, new GatewayError(502, 'TUNNEL_START_FAILED', 'cloudflared did not provide a public URL within 15 seconds'));
       }, 15000);
       child.stdout?.on('data', onData);

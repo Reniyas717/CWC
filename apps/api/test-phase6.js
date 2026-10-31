@@ -9,10 +9,19 @@
  */
 
 import pg from 'pg';
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config();
 
 const base = process.env.API_BASE_URL || 'http://localhost:4000';
 const adminToken = process.env.ADMIN_TOKEN || 'dev-admin-token-change-in-production';
-const workerToken = process.env.WORKER_SECRET_TOKEN || 'dev-worker-secret-token-change-in-production';
+const workerToken =
+  process.env.WORKER_SECRET_TOKEN || 'dev-worker-secret-token-change-in-production';
 const databaseUrl =
   process.env.DATABASE_URL ||
   'postgresql://cwc_user:cwc_password@localhost:5432/cloud_without_clouds?schema=public';
@@ -48,7 +57,9 @@ async function runPhase6Tests() {
     // Reset any pending unassigned deployments from prior runs
     await pool.query("UPDATE deployments SET state = 'cancelled' WHERE state = 'queued'");
     // Age all pre-existing workers (>30s) so only freshly registered test workers compete
-    await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1', [new Date(Date.now() - 40_000)]);
+    await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1', [
+      new Date(Date.now() - 40_000),
+    ]);
 
     // -------------------------------------------------------------------------
     // TEST 1: S(W) Load Score Formula Exactness
@@ -86,11 +97,17 @@ async function runPhase6Tests() {
       headers: adminHeaders,
     });
     const scoreJson = await scoreRes.json();
-    assert(scoreRes.status === 200 && scoreJson.success === true, 'GET /api/v1/workers/scores succeeded');
+    assert(
+      scoreRes.status === 200 && scoreJson.success === true,
+      'GET /api/v1/workers/scores succeeded'
+    );
 
     const workerAScore = scoreJson.data.find((w) => w.workerId === workerAId);
     assert(workerAScore !== undefined, 'Worker A found in scores breakdown');
-    assert(Math.abs(workerAScore.score - 0.22) < 0.001, `Worker A score is exactly 0.22 (got ${workerAScore.score})`);
+    assert(
+      Math.abs(workerAScore.score - 0.22) < 0.001,
+      `Worker A score is exactly 0.22 (got ${workerAScore.score})`
+    );
     assert(workerAScore.memoryRatio === 0.2, 'Worker A memory ratio is 0.2');
     assert(workerAScore.cpuRatio === 0.3, 'Worker A CPU ratio is 0.3');
     assert(workerAScore.containerRatio === 0.1, 'Worker A container ratio is 0.1');
@@ -288,12 +305,17 @@ async function runPhase6Tests() {
       }),
     });
 
-    const scoreCheck = await fetch(`${base}/api/v1/workers/scores?memoryMb=1024`, { headers: adminHeaders });
+    const scoreCheck = await fetch(`${base}/api/v1/workers/scores?memoryMb=1024`, {
+      headers: adminHeaders,
+    });
     const scoreCheckJson = await scoreCheck.json();
     const ramFailNode = scoreCheckJson.data.find((w) => w.workerId === workerRamFailId);
     const capFailNode = scoreCheckJson.data.find((w) => w.workerId === workerCapFailId);
 
-    assert(ramFailNode.eligible === false, 'RAM-depleted worker correctly marked ineligible for 1024MB task');
+    assert(
+      ramFailNode.eligible === false,
+      'RAM-depleted worker correctly marked ineligible for 1024MB task'
+    );
     assert(
       ramFailNode.rejectionReasons.some((r) => r.includes('Insufficient free memory')),
       'Rejection reason specifies memory shortfall'
@@ -307,9 +329,13 @@ async function runPhase6Tests() {
     // -------------------------------------------------------------------------
     // TEST 5: Exhaustion Re-evaluation on Worker Registration / Heartbeat
     // -------------------------------------------------------------------------
-    console.log('\n--- Test 5: Unassigned queued deployment scheduled when fresh worker registers ---');
+    console.log(
+      '\n--- Test 5: Unassigned queued deployment scheduled when fresh worker registers ---'
+    );
     // Mark all existing workers stale (>30s)
-    await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1', [new Date(Date.now() - 50_000)]);
+    await pool.query('UPDATE worker_nodes SET last_heartbeat_at = $1', [
+      new Date(Date.now() - 50_000),
+    ]);
 
     // Submit a deployment when no eligible workers exist
     const unassignedDepRes = await fetch(`${base}/api/v1/deployments`, {
@@ -325,7 +351,10 @@ async function runPhase6Tests() {
     });
     const unassignedDepJson = await unassignedDepRes.json();
     const exhaustDepId = unassignedDepJson.data.id;
-    assert(unassignedDepJson.data.workerId === undefined, 'Deployment submitted with no eligible workers remains unassigned (workerId: null)');
+    assert(
+      unassignedDepJson.data.workerId === undefined,
+      'Deployment submitted with no eligible workers remains unassigned (workerId: null)'
+    );
 
     // Now a new healthy worker registers
     const freshWorkerId = `worker-p6-fresh-${Date.now()}`;
@@ -355,12 +384,14 @@ async function runPhase6Tests() {
     await new Promise((r) => setTimeout(r, 200));
 
     // Verify deployment is now assigned to the fresh worker
-    const checkScheduled = await pool.query('SELECT worker_id, state FROM deployments WHERE id = $1', [exhaustDepId]);
+    const checkScheduled = await pool.query(
+      'SELECT worker_id, state FROM deployments WHERE id = $1',
+      [exhaustDepId]
+    );
     assert(
       checkScheduled.rows[0].worker_id === freshWorkerId,
       `Queued deployment was automatically scheduled to fresh worker '${freshWorkerId}' upon registration`
     );
-
   } catch (err) {
     console.error('Fatal test error:', err);
     failed++;
@@ -369,7 +400,9 @@ async function runPhase6Tests() {
   }
 
   console.log('\n==================================================');
-  console.log(`Phase 6 Verification Summary: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+  console.log(
+    `Phase 6 Verification Summary: ${passed} passed, ${failed} failed, ${passed + failed} total`
+  );
   console.log('==================================================');
 
   if (failed > 0) {

@@ -41,6 +41,7 @@ export const WorkerRegistrationSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   hostname: z.string(),
+  ipAddress: z.string().optional(),
   port: z.number().int().positive(),
   authToken: z.string().min(8),
   resources: WorkerResourcesSchema,

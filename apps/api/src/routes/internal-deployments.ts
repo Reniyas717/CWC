@@ -220,6 +220,18 @@ internalDeploymentsRouter.post('/:id/logs', async (req: Request, res: Response) 
   const { logs } = parseResult.data;
 
   try {
+    const existing = await db.select().from(deployments).where(eq(deployments.id, id));
+    if (existing.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: `Deployment '${id}' not found`,
+        },
+      });
+      return;
+    }
+
     if (logs.length > 0) {
       await db.insert(deploymentLogs).values(
         logs.map((log) => ({

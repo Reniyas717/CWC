@@ -9,7 +9,6 @@ import {
   Download,
   Filter,
   CheckCircle2,
-  AlertCircle,
   ExternalLink,
 } from 'lucide-react';
 import { Deployment, DeploymentLogEntry } from '@cloud-without-clouds/shared';
@@ -48,7 +47,8 @@ export function LogsPage() {
     queryKey: ['deployment-logs', activeDep?.id],
     queryFn: () => (activeDep ? api.getDeploymentLogs(activeDep.id) : Promise.resolve([])),
     enabled: !!activeDep,
-    refetchInterval: activeDep?.state === 'running' || activeDep?.state === 'building' ? 3000 : false,
+    refetchInterval:
+      activeDep?.state === 'running' || activeDep?.state === 'building' ? 3000 : false,
   });
 
   // Filter logs
@@ -131,7 +131,11 @@ export function LogsPage() {
             onClick={handleCopyLogs}
             className="h-8.5 text-xs flex items-center gap-1.5"
           >
-            {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            {isCopied ? (
+              <Check className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <Copy className="h-3.5 w-3.5" />
+            )}
             <span>{isCopied ? 'Copied' : 'Copy'}</span>
           </Button>
 
@@ -320,7 +324,8 @@ export function LogsPage() {
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
             <span>
-              Stream Buffer: <strong className="text-foreground">{filteredLogs.length}</strong> / {logs.length} entries
+              Stream Buffer: <strong className="text-foreground">{filteredLogs.length}</strong> /{' '}
+              {logs.length} entries
             </span>
           </div>
           <div className="flex items-center gap-2">
