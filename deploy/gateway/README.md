@@ -3,12 +3,22 @@
 The gateway runs on Laptop 4 in Ubuntu/WSL. Install Node.js, Caddy and
 `cloudflared` using their official Ubuntu instructions. Keep Caddy's admin API
 on `127.0.0.1:2019`; expose only the gateway service on the Tailscale
-interface and protect it with `GATEWAY_TOKEN`.
+interface and protect it with `GATEWAY_TOKEN`. The default service bind is
+loopback for local tests. When the control plane runs on another laptop, set
+`GATEWAY_BIND_HOST` to the gateway's current Tailscale IPv4, discovered with
+`tailscale ip -4` (for Laptop 4, currently `100.70.86.53`). Never use
+`0.0.0.0`.
 
 Start the service for a local test with:
 
 ```bash
-GATEWAY_TOKEN=replace-me node deploy/gateway/gateway.mjs
+GATEWAY_TOKEN=replace-me GATEWAY_BIND_HOST=127.0.0.1 node deploy/gateway/gateway.mjs
+```
+
+For remote control-plane access, use the current Tailscale address instead:
+
+```bash
+GATEWAY_TOKEN=replace-me GATEWAY_BIND_HOST="$(tailscale ip -4)" node deploy/gateway/gateway.mjs
 ```
 
 The control plane calls `POST /v1/routes/<deployment-id>` with an upstream
@@ -48,7 +58,9 @@ worker-originated reconciliation data directly.
 
 For a systemd installation, copy `gateway.service.example` to
 `/etc/systemd/system/cloud-without-clouds-gateway.service`, create the
-environment file with a secret `GATEWAY_TOKEN`, then enable and start the unit.
+environment file with a secret `GATEWAY_TOKEN` and the current
+`GATEWAY_BIND_HOST=$(tailscale ip -4)`, then enable and start the unit. Keep
+that address current if Tailscale assigns a new one.
 The Ubuntu/WSL host and its distribution must remain running; systemd cannot
 recover a powered-off laptop or stopped WSL instance.
 

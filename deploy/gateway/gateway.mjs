@@ -2,10 +2,10 @@
 
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
 
 const DEFAULT_CADDY_ADMIN = 'http://127.0.0.1:2019';
 const DEFAULT_LISTENER_BASE = 18080;
+const MAX_REQUEST_BODY_BYTES = 1024 * 1024;
 
 export class GatewayError extends Error {
   constructor(status, code, message) {
@@ -58,8 +58,19 @@ function jsonResponse(response, status, body) {
 }
 
 async function readJson(request) {
+  const declaredLength = Number(request.headers['content-length']);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BODY_BYTES) {
+    throw new GatewayError(413, 'REQUEST_BODY_TOO_LARGE', 'request body exceeds 1 MiB');
+  }
   let body = '';
-  for await (const chunk of request) body += chunk;
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += Buffer.byteLength(chunk);
+    if (bytes > MAX_REQUEST_BODY_BYTES) {
+      throw new GatewayError(413, 'REQUEST_BODY_TOO_LARGE', 'request body exceeds 1 MiB');
+    }
+    body += chunk;
+  }
   if (!body) return {};
   try {
     return JSON.parse(body);
@@ -360,15 +371,15 @@ export class RouteManager {
       throw new ReconciliationError();
     }
     if (!Array.isArray(desired)) {
-      await this.#clearRoutes().catch(() => {});
-      this.routes.clear();
-      throw new ReconciliationError('authoritative state must be an array of deployments');
+      throw new GatewayError(400, 'INVALID_RECONCILIATION', 'routes must be an array of deployments');
     }
+
+    const validated = desired.map((route) => validateRouteInput(route));
 
     await this.#clearRoutes();
     const restored = [];
     try {
-      for (const route of desired) restored.push(await this.#publish(route));
+      for (const route of validated) restored.push(await this.#publish(route));
     } catch (error) {
       for (const deploymentId of [...this.routes.keys()]) await this.#remove(deploymentId, { ignoreMissing: true }).catch(() => {});
       throw error;

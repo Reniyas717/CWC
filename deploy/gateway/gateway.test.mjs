@@ -43,6 +43,14 @@ const endpoint = `http://127.0.0.1:${servicePort}/v1/routes/demo`;
 let response = await fetch(endpoint);
 assert.equal(response.status, 401);
 
+response = await fetch(endpoint, {
+  method: 'POST',
+  headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+  body: JSON.stringify({ oversized: 'x'.repeat(1024 * 1024 + 1) }),
+});
+assert.equal(response.status, 413);
+assert.equal((await response.json()).error.code, 'REQUEST_BODY_TOO_LARGE');
+
 response = await fetch(endpoint, { method: 'POST', headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' }, body: JSON.stringify({ upstreamIp: '100.70.86.53', upstreamPort: healthPort }) });
 assert.equal(response.status, 502);
 
@@ -122,6 +130,15 @@ response = await fetch(`http://127.0.0.1:${servicePort}/v1/reconcile`, {
 });
 assert.equal(response.status, 200);
 assert.equal((await response.json()).data[0].deploymentId, 'api-restored');
+
+response = await fetch(`http://127.0.0.1:${servicePort}/v1/reconcile`, {
+  method: 'POST',
+  headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+  body: JSON.stringify({ routes: [{ deploymentId: 'bad/id', upstreamIp: '100.70.86.53', upstreamPort: healthPort }] }),
+});
+assert.equal(response.status, 400);
+assert.equal((await response.json()).error.code, 'INVALID_DEPLOYMENT_ID');
+assert.equal(manager.get('api-restored').status, 'ready');
 
 await assert.rejects(
   manager.reconcile(async () => { throw new Error('control plane unavailable'); }),
