@@ -1,4 +1,10 @@
 import {
+  DeploymentLogsPayload,
+  DeploymentLogsPayloadSchema,
+  DeploymentResultPayload,
+  DeploymentResultPayloadSchema,
+  DeploymentTaskResponse,
+  DeploymentTaskResponseSchema,
   WorkerHeartbeat,
   WorkerHeartbeatSchema,
   WorkerRegistration,
@@ -82,7 +88,6 @@ export class ControlPlaneClient {
 
         // Endpoint is not implemented yet (e.g. 501 Not Implemented)
         if (response.status === 501) {
-          logger.warn(`Endpoint ${endpoint} returned 501 (Not Implemented on Control Plane)`);
           return {
             ok: false,
             statusCode: 501,
@@ -93,7 +98,6 @@ export class ControlPlaneClient {
 
         // 404 Not Found (endpoint not yet created by Control Plane teammate)
         if (response.status === 404) {
-          logger.warn(`Endpoint ${endpoint} not found (404 on Control Plane)`);
           return {
             ok: false,
             statusCode: 404,
@@ -133,11 +137,7 @@ export class ControlPlaneClient {
       } catch (err: unknown) {
         clearTimeout(timeoutId);
         const isAbort = err instanceof Error && err.name === 'AbortError';
-        const errorDesc = isAbort
-          ? `Request timeout (${timeoutMs}ms)`
-          : err instanceof Error
-            ? err.message
-            : String(err);
+        const errorDesc = isAbort ? `Request timeout (${timeoutMs}ms)` : (err instanceof Error ? err.message : String(err));
 
         if (attempt < this.maxRetries) {
           attempt++;
@@ -148,7 +148,6 @@ export class ControlPlaneClient {
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
         } else {
-          logger.error(`Failed to connect to ${endpoint} after ${this.maxRetries} retries`, err);
           return {
             ok: false,
             statusCode: 0,
@@ -186,14 +185,11 @@ export class ControlPlaneClient {
    */
   public async register(payload: WorkerRegistration): Promise<ApiResponse> {
     const validated = WorkerRegistrationSchema.parse(payload);
-    logger.info(
-      `Sending worker registration for ${validated.id} to ${this.baseUrl}/api/v1/workers/register...`,
-      {
-        workerId: validated.id,
-        port: validated.port,
-        hostname: validated.hostname,
-      }
-    );
+    logger.info(`Sending worker registration for ${validated.id} to ${this.baseUrl}/api/v1/workers/register...`, {
+      workerId: validated.id,
+      port: validated.port,
+      hostname: validated.hostname,
+    });
 
     return this.requestWithRetry('/api/v1/workers/register', {
       method: 'POST',
@@ -244,7 +240,63 @@ export class ControlPlaneClient {
           timestamp: new Date().toISOString(),
         }),
       },
-      2000 // Fast timeout for shutdown notifications
+      2000
     );
+  }
+
+  /**
+   * Polls Control Plane for pending deployment tasks for this worker.
+   * Path: GET /api/v1/workers/:id/tasks
+   */
+  public async pollTasks(workerId: string): Promise<ApiResponse<DeploymentTaskResponse>> {
+    const res = await this.requestWithRetry<unknown>(`/api/v1/workers/${workerId}/tasks`, {
+      method: 'GET',
+      headers: this.getAuthHeaders(),
+    });
+
+    if (res.ok && res.data) {
+      const parsed = DeploymentTaskResponseSchema.safeParse(res.data);
+      if (parsed.success) {
+        return {
+          ...res,
+          data: parsed.data,
+        };
+      }
+    }
+
+    return res as ApiResponse<DeploymentTaskResponse>;
+  }
+
+  /**
+   * Reports final or transition result of a deployment to the Control Plane.
+   * Path: POST /api/v1/internal/deployments/:id/result
+   */
+  public async reportResult(payload: DeploymentResultPayload): Promise<ApiResponse> {
+    const validated = DeploymentResultPayloadSchema.parse(payload);
+    logger.info(`Reporting deployment result for ${validated.deploymentId} (${validated.state})...`, {
+      deploymentId: validated.deploymentId,
+      state: validated.state,
+      port: validated.assignedPort,
+      containerId: validated.containerId,
+    });
+
+    return this.requestWithRetry(`/api/v1/internal/deployments/${validated.deploymentId}/result`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(validated),
+    });
+  }
+
+  /**
+   * Flushes deployment build and runtime logs to the Control Plane.
+   * Path: POST /api/v1/internal/deployments/:id/logs
+   */
+  public async sendLogs(payload: DeploymentLogsPayload): Promise<ApiResponse> {
+    const validated = DeploymentLogsPayloadSchema.parse(payload);
+    return this.requestWithRetry(`/api/v1/internal/deployments/${validated.deploymentId}/logs`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(validated),
+    });
   }
 }

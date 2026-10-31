@@ -1,5 +1,6 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
+import { startSweeper, stopSweeper } from './services/sweeper.js';
 
 const app = createApp();
 
@@ -13,11 +14,15 @@ const server = app.listen(env.PORT, () => {
   CORS Origin : ${env.CORS_ORIGIN}
 ==================================================
 `);
+
+  // Start background heartbeat sweeper and failure recovery engine
+  startSweeper();
 });
 
 // Graceful shutdown handling
 const shutdown = (signal: string) => {
   console.log(`\nReceived ${signal}, gracefully shutting down API server...`);
+  stopSweeper();
   server.close(() => {
     console.log('API server closed.');
     process.exit(0);
