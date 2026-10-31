@@ -1,59 +1,163 @@
-import { workerEnv } from './config/env.js';
-import { WorkerHealthMonitor } from './modules/health/status.js';
-import { DockerEngineModule } from './modules/docker/engine.js';
-import { ControlPlaneClient } from './modules/control-plane/client.js';
+import os from 'os';
+import { WorkerHeartbeat, WorkerRegistration } from '@cloud-without-clouds/shared';
+import { workerConfig } from './config.js';
+import { createLogger } from './logger.js';
+import { ControlPlaneClient } from './services/control-plane-client.js';
+import { MetricsService } from './services/metrics.js';
 
-async function main() {
-  console.log(`
-==================================================
-🤖 Cloud Without Clouds - Distributed Worker Agent
-==================================================
-  Worker ID        : ${workerEnv.WORKER_ID}
-  Worker Name      : ${workerEnv.WORKER_NAME}
-  Control Plane    : ${workerEnv.CONTROL_PLANE_URL}
-  Max Workloads    : ${workerEnv.MAX_CONCURRENT_WORKLOADS}
-  Memory Limit     : ${workerEnv.TOTAL_MEMORY_LIMIT_MB} MB
-==================================================
-`);
+const logger = createLogger('WorkerAgent');
 
-  const healthMonitor = new WorkerHealthMonitor();
-  const dockerEngine = new DockerEngineModule();
-  const controlPlaneClient = new ControlPlaneClient(healthMonitor);
+let heartbeatTimer: NodeJS.Timeout | null = null;
+let isHeartbeatRunning = false;
+let isShuttingDown = false;
 
-  await dockerEngine.initialize();
+async function bootstrap() {
+  logger.info('==================================================');
+  logger.info('🤖 Cloud Without Clouds - Distributed Worker Agent');
+  logger.info('==================================================');
+  logger.info(`Worker ID         : ${workerConfig.WORKER_ID}`);
+  logger.info(`Worker Name       : ${workerConfig.WORKER_NAME}`);
+  logger.info(`Control Plane URL : ${workerConfig.CONTROL_PLANE_URL}`);
+  logger.info(`Worker Port       : ${workerConfig.WORKER_PORT}`);
+  logger.info(`Max Workloads     : ${workerConfig.MAX_CONCURRENT_WORKLOADS}`);
+  logger.info(`Memory Limit      : ${workerConfig.TOTAL_MEMORY_LIMIT_MB} MB`);
+  logger.info(`Max CPU Cores     : ${workerConfig.MAX_CPU_CORES}`);
+  logger.info(`Heartbeat Interval: ${workerConfig.HEARTBEAT_INTERVAL_MS} ms`);
+  logger.info(`Environment       : ${workerConfig.NODE_ENV}`);
+  logger.info('==================================================');
 
-  // Initial resource inspection
-  const initialResources = healthMonitor.getResources();
-  console.log('[Worker Status] Host metrics:', {
+  const metricsService = new MetricsService();
+  const controlPlaneClient = new ControlPlaneClient();
+
+  // 1. Initial health inspection of host resources
+  const initialResources = metricsService.getResources();
+  logger.info('Host initial metrics collected', {
     cpuCores: initialResources.cpuCount,
-    totalMemory: `${initialResources.totalMemoryMb} MB`,
-    freeMemory: `${initialResources.freeMemoryMb} MB`,
+    totalMemoryMb: initialResources.totalMemoryMb,
+    freeMemoryMb: initialResources.freeMemoryMb,
+    usedMemoryMb: initialResources.usedMemoryMb,
   });
 
-  // Verify connection to control plane
-  const isControlPlaneConnected = await controlPlaneClient.checkConnection();
-  if (isControlPlaneConnected) {
-    console.log(`[Worker Status] Control Plane reachable at ${workerEnv.CONTROL_PLANE_URL}`);
+  // 2. Initial reachability check of Control Plane
+  const isHealthy = await controlPlaneClient.checkHealth();
+  if (isHealthy) {
+    logger.info(`Control Plane verified reachable at ${workerConfig.CONTROL_PLANE_URL}`);
   } else {
-    console.log(
-      `[Worker Status] Control Plane currently offline at ${workerEnv.CONTROL_PLANE_URL} (will retry upon activation)`
+    logger.warn(
+      `Control Plane currently unreachable at ${workerConfig.CONTROL_PLANE_URL}. Starting in resilient standby mode.`
     );
   }
 
-  console.log('[Worker Ready] Worker agent initialized and awaiting deployment tasks.');
+  // 3. Worker registration with Control Plane
+  const registrationPayload: WorkerRegistration = {
+    id: workerConfig.WORKER_ID,
+    name: workerConfig.WORKER_NAME,
+    hostname: os.hostname(),
+    port: workerConfig.WORKER_PORT,
+    authToken: workerConfig.WORKER_SECRET_TOKEN,
+    resources: initialResources,
+    limits: {
+      maxConcurrentWorkloads: workerConfig.MAX_CONCURRENT_WORKLOADS,
+      maxMemoryMb: workerConfig.TOTAL_MEMORY_LIMIT_MB,
+      maxCpuCores: workerConfig.MAX_CPU_CORES,
+    },
+    version: '0.1.0',
+  };
 
-  // Handle graceful termination
-  const shutdown = (signal: string) => {
-    console.log(`\nReceived ${signal}, gracefully stopping worker agent...`);
-    healthMonitor.setState('offline');
+  const regResponse = await controlPlaneClient.register(registrationPayload);
+  if (regResponse.ok) {
+    logger.info('Worker successfully registered with Control Plane');
+  } else if (regResponse.isNotImplemented) {
+    logger.warn(
+      `Worker registration endpoint returned HTTP ${regResponse.statusCode}. Control-plane registration handler is pending implementation by Teammate 2.`
+    );
+  } else {
+    logger.warn(
+      `Worker registration attempt unsuccessful: ${regResponse.error || `HTTP ${regResponse.statusCode}`}. Continuing with periodic heartbeat telemetry.`
+    );
+  }
+
+  // 4. Non-overlapping periodic heartbeat telemetry loop
+  const executeHeartbeat = async () => {
+    if (isShuttingDown || isHeartbeatRunning) {
+      return;
+    }
+
+    isHeartbeatRunning = true;
+    try {
+      const resources = metricsService.getResources();
+      const heartbeatPayload: WorkerHeartbeat = {
+        workerId: workerConfig.WORKER_ID,
+        state: metricsService.getState(),
+        resources,
+        activeWorkloadIds: metricsService.getActiveWorkloadIds(),
+        timestamp: new Date().toISOString(),
+      };
+
+      const res = await controlPlaneClient.sendHeartbeat(heartbeatPayload);
+      if (res.ok) {
+        logger.debug('Heartbeat acknowledged by Control Plane', {
+          state: heartbeatPayload.state,
+          freeMemoryMb: resources.freeMemoryMb,
+          cpuUsagePercent: resources.cpuUsagePercent,
+        });
+      } else if (res.isNotImplemented) {
+        logger.debug(
+          `Heartbeat endpoint returned HTTP ${res.statusCode} (endpoint pending on Control Plane)`
+        );
+      } else {
+        logger.warn(`Heartbeat report failed: ${res.error || `HTTP ${res.statusCode}`}`);
+      }
+    } catch (err: unknown) {
+      logger.error('Unexpected error during heartbeat execution', err);
+    } finally {
+      isHeartbeatRunning = false;
+    }
+  };
+
+  // Start heartbeat interval timer
+  heartbeatTimer = setInterval(executeHeartbeat, workerConfig.HEARTBEAT_INTERVAL_MS);
+  logger.info(
+    `Heartbeat telemetry loop active (interval: ${workerConfig.HEARTBEAT_INTERVAL_MS}ms)`
+  );
+
+  // 5. Graceful termination handler
+  const shutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    logger.info(`Received ${signal}. Initiating graceful worker shutdown...`);
+
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+
+    metricsService.setState('draining');
+
+    try {
+      // Notify Control Plane about draining/offline state with timeout
+      await controlPlaneClient.sendStatus(
+        workerConfig.WORKER_ID,
+        'draining',
+        `Worker shutting down via ${signal}`
+      );
+    } catch {
+      // Ignore network errors on shutdown
+    }
+
+    metricsService.setState('offline');
+    logger.info('Worker agent shut down cleanly. Exiting.');
     process.exit(0);
   };
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+
+  logger.info('[Worker Ready] Worker agent initialized and awaiting deployment tasks.');
 }
 
-main().catch((err) => {
-  console.error('Fatal worker error:', err);
+bootstrap().catch((err: unknown) => {
+  logger.error('Fatal error during worker bootstrap', err);
   process.exit(1);
 });
