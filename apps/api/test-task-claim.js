@@ -42,6 +42,7 @@ async function registerWorker(id, freeMemoryMb = 4096) {
       id,
       name: `Task claim test ${id}`,
       hostname: id,
+      ipAddress: '100.100.0.20',
       port: 5001,
       authToken: workerToken,
       resources: {

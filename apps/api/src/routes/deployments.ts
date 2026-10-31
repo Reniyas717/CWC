@@ -2,7 +2,12 @@ import { Router, Request, Response } from 'express';
 import { eq, desc, asc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
-import { Deployment, DeploymentLogEntry, AppFrameworkSchema } from '@cloud-without-clouds/shared';
+import {
+  Deployment,
+  DeploymentLogEntry,
+  AppFrameworkSchema,
+  RoutingStatusSchema,
+} from '@cloud-without-clouds/shared';
 import { requireAdmin, optionalAdmin } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
 import {
@@ -39,6 +44,12 @@ async function ensureDefaultAdminUser(): Promise<string> {
  * Transforms a database deployment record into the canonical `Deployment` type.
  */
 function mapDeploymentRow(row: typeof deployments.$inferSelect): Deployment {
+  const routingStatus = RoutingStatusSchema.safeParse(row.routingStatus);
+  if (!routingStatus.success) {
+    console.warn(
+      `[Deployments] Invalid routing status '${row.routingStatus}' for ${row.id}; using pending`
+    );
+  }
   return {
     id: row.id,
     applicationId: row.applicationId,
@@ -52,7 +63,7 @@ function mapDeploymentRow(row: typeof deployments.$inferSelect): Deployment {
     assignedPort: row.assignedPort ?? undefined,
     publicUrl: row.publicUrl ?? undefined,
     workerUrl: row.workerUrl ?? undefined,
-    routingStatus: (row.routingStatus as Deployment['routingStatus']) || 'pending',
+    routingStatus: routingStatus.success ? routingStatus.data : 'pending',
     routingError: row.routingError ?? undefined,
     errorMessage: row.errorMessage ?? undefined,
     createdAt: row.createdAt.toISOString(),

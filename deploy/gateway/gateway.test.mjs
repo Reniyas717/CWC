@@ -228,6 +228,18 @@ assert.equal(response.status, 400);
 assert.equal((await response.json()).error.code, 'INVALID_DEPLOYMENT_ID');
 assert.equal(manager.get('api-restored').status, 'ready');
 
+// A single unhealthy desired upstream must not take down an unrelated route
+// that is already serving successfully.
+probeAvailable = false;
+const partiallyRestored = await manager.reconcile(async () => [
+  { deploymentId: 'api-restored', upstreamIp: '100.70.86.53', upstreamPort: healthPort },
+  { deploymentId: 'unhealthy', upstreamIp: '100.70.86.53', upstreamPort: 1 },
+]);
+assert.equal(partiallyRestored.some((route) => route.deploymentId === 'api-restored'), true);
+assert.equal(manager.get('api-restored').status, 'ready');
+assert.throws(() => manager.get('unhealthy'), /route was not found/);
+probeAvailable = true;
+
 await assert.rejects(
   manager.reconcile(async () => {
     throw new Error('control plane unavailable');

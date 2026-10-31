@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TailscaleIpv4Schema } from './worker.js';
 
 export const DeploymentStateSchema = z.enum([
   'pending',
@@ -15,6 +16,33 @@ export type DeploymentState = z.infer<typeof DeploymentStateSchema>;
 /** Lifecycle of the public ingress route, independent from the worker container. */
 export const RoutingStatusSchema = z.enum(['pending', 'ready', 'failed']);
 export type RoutingStatus = z.infer<typeof RoutingStatusSchema>;
+
+/** Shape returned by the standalone gateway service. */
+export const GatewayPublishedRouteSchema = z.object({
+  deploymentId: z.string().min(1),
+  attemptId: z.string().min(1).optional(),
+  status: z.string().min(1),
+  publicUrl: z
+    .string()
+    .url()
+    .refine((value) => value.startsWith('https://'), 'Gateway URLs must use HTTPS')
+    .optional(),
+  listenerPort: z.number().int().min(1).max(65535).optional(),
+  upstreamIp: TailscaleIpv4Schema,
+  upstreamPort: z.number().int().min(1).max(65535),
+  healthPath: z.string().startsWith('/').optional(),
+});
+export type GatewayPublishedRoute = z.infer<typeof GatewayPublishedRouteSchema>;
+
+export const GatewayPublishedRouteResponseSchema = z.object({
+  success: z.literal(true),
+  data: GatewayPublishedRouteSchema,
+});
+
+export const GatewayReconciliationResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(GatewayPublishedRouteSchema),
+});
 
 export const DeploymentLogEntrySchema = z.object({
   id: z.string().uuid().optional(),

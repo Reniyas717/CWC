@@ -263,6 +263,8 @@ export function WorkersPage() {
             const secondsAgo = Math.max(0, Math.round((Date.now() - lastSeen.getTime()) / 1000));
             const isFresh = secondsAgo < 15;
             const isWarning = secondsAgo >= 15 && secondsAgo < 30;
+            const leaseStatus =
+              worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
 
             const scoreInfo = getScoreForWorker(worker.id);
 
@@ -377,7 +379,7 @@ export function WorkersPage() {
                         </span>
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground">
-                        Heartbeat lease: active in Redis
+                        Heartbeat lease: {leaseStatus}
                       </div>
                     </div>
                   )}

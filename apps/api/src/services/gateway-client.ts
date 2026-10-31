@@ -1,15 +1,11 @@
+import {
+  GatewayPublishedRouteResponseSchema,
+  GatewayReconciliationResponseSchema,
+  GatewayPublishedRoute,
+} from '@cloud-without-clouds/shared';
 import { env } from '../config/env.js';
 
-export interface PublishedRoute {
-  deploymentId: string;
-  attemptId?: string;
-  status: string;
-  publicUrl?: string;
-  listenerPort?: number;
-  upstreamIp: string;
-  upstreamPort: number;
-  healthPath?: string;
-}
+export type PublishedRoute = GatewayPublishedRoute;
 
 export class GatewayClient {
   private baseUrl: string;
@@ -55,11 +51,15 @@ export class GatewayClient {
         );
 
         if (response.ok) {
-          const body = (await response.json()) as { success: boolean; data: PublishedRoute };
+          const parsed = GatewayPublishedRouteResponseSchema.safeParse(await response.json());
+          if (!parsed.success) {
+            console.warn(`[GatewayClient] Gateway returned an invalid route for ${deploymentId}`);
+            return null;
+          }
           console.log(
-            `[GatewayClient] Route published for ${deploymentId}: ${body.data?.publicUrl || 'ready'}`
+            `[GatewayClient] Route published for ${deploymentId}: ${parsed.data.data.publicUrl || 'ready'}`
           );
-          return body.data;
+          return parsed.data.data;
         }
 
         const errorText = await response.text().catch(() => '');
@@ -156,6 +156,7 @@ export class GatewayClient {
   async reconcileRoutes(
     routes: Array<{
       deploymentId: string;
+      attemptId?: string;
       upstreamIp: string;
       upstreamPort: number;
       healthPath?: string;
@@ -176,15 +177,12 @@ export class GatewayClient {
         });
 
         if (response.ok) {
-          const body = (await response.json()) as {
-            success?: boolean;
-            data?: PublishedRoute[];
-          };
-          if (!body.success || !Array.isArray(body.data)) {
+          const parsed = GatewayReconciliationResponseSchema.safeParse(await response.json());
+          if (!parsed.success) {
             console.warn('[GatewayClient] Gateway returned an invalid reconciliation response');
             return null;
           }
-          return body.data;
+          return parsed.data.data;
         }
 
         const errorText = await response.text().catch(() => '');

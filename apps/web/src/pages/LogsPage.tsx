@@ -44,6 +44,9 @@ export function LogsPage() {
       ? deployments[0]
       : deployments.find((d) => d.id === selectedDeploymentId) || deployments[0];
 
+  const isTailPolling =
+    Boolean(activeDep) && (activeDep?.state === 'running' || activeDep?.state === 'building');
+
   const {
     data: logs = [],
     isLoading,
@@ -70,6 +73,16 @@ export function LogsPage() {
       return matchesStream && matchesSearch;
     });
   }, [logs, streamFilter, searchQuery]);
+
+  const tailStatus = isDeploymentsError || isLogsError
+    ? 'Unavailable'
+    : isLoading
+      ? 'Connecting'
+      : isTailPolling
+        ? 'Polling'
+        : activeDep
+          ? 'Idle'
+          : 'No deployment';
 
   // Auto-scroll
   React.useEffect(() => {
@@ -352,8 +365,10 @@ export function LogsPage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Worker Agent Tail: Connected</span>
+            <CheckCircle2
+              className={`h-3.5 w-3.5 ${tailStatus === 'Unavailable' ? 'text-destructive' : 'text-emerald-500'}`}
+            />
+            <span>Worker Agent Tail: {tailStatus}</span>
           </div>
         </div>
       </Card>

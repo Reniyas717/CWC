@@ -123,8 +123,9 @@ export async function reconcileGatewayRoutes(
   }
 
   const published = await gatewayClient.reconcileRoutes(
-    desired.map(({ deploymentId, upstreamIp, upstreamPort, healthPath }) => ({
+    desired.map(({ deploymentId, attemptId, upstreamIp, upstreamPort, healthPath }) => ({
       deploymentId,
+      attemptId: attemptId ?? undefined,
       upstreamIp,
       upstreamPort,
       healthPath,
