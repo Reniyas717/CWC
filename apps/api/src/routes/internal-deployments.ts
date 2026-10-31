@@ -59,13 +59,8 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
       // rows that have not been claimed yet; claimed rows always require it.
       const ownsAttempt =
         payload.workerId === currentDep.workerId &&
-        (currentDep.attemptId
-          ? payload.attemptId === currentDep.attemptId
-          : !payload.attemptId);
-      if (
-        !ownsAttempt ||
-        currentDep.state === 'cancelled'
-      ) {
+        (currentDep.attemptId ? payload.attemptId === currentDep.attemptId : !payload.attemptId);
+      if (!ownsAttempt || currentDep.state === 'cancelled') {
         return {
           kind: 'stale' as const,
           state: currentDep.state,
@@ -105,16 +100,22 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
           state: payload.state,
           containerId: payload.containerId ?? currentDep.containerId,
           assignedPort: payload.assignedPort ?? currentDep.assignedPort,
-          publicUrl: payload.publicUrl ?? currentDep.publicUrl,
+          // Worker reports historically called this field publicUrl. It is
+          // private and must never be returned as the platform URL.
+          workerUrl: payload.workerUrl ?? payload.publicUrl ?? currentDep.workerUrl,
+          publicUrl: payload.state === 'running' ? null : currentDep.publicUrl,
+          routingStatus: payload.state === 'running' ? 'pending' : 'failed',
+          routingError:
+            payload.state === 'running'
+              ? null
+              : payload.errorMessage || `Container is ${payload.state}; public route removed`,
           gitCommitHash: payload.gitCommitHash ?? currentDep.gitCommitHash,
           errorMessage: payload.errorMessage ?? null,
           startedAt,
           finishedAt,
           updatedAt: now,
         })
-        .where(
-          eq(deployments.id, id)
-        )
+        .where(eq(deployments.id, id))
         .returning();
 
       if (updated.length === 0) {
@@ -190,7 +191,8 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
         state: outcome.state,
         error: {
           code: 'STALE_DEPLOYMENT_RESULT',
-          message: 'Deployment result belongs to an obsolete worker assignment or cancelled deployment',
+          message:
+            'Deployment result belongs to an obsolete worker assignment or cancelled deployment',
         },
       });
       return;
@@ -242,27 +244,70 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
             '/'
           );
 
-          if (published?.publicUrl) {
-            await db
-              .update(deployments)
-              .set({
-                publicUrl: published.publicUrl,
-                updatedAt: new Date(),
-              })
-              .where(
-                and(
-                  eq(deployments.id, id),
-                  eq(deployments.state, 'running'),
-                  outcome.attemptId
-                    ? eq(deployments.attemptId, outcome.attemptId)
-                    : eq(deployments.workerId, targetWorkerId ?? '')
-                )
-              );
+          if (!published?.publicUrl) {
+            throw new Error('Gateway did not return a public HTTPS URL');
+          }
+
+          // The worker may have been stopped or reassigned while the gateway
+          // request was in flight. Only the same running attempt may publish.
+          const guard = [eq(deployments.id, id), eq(deployments.state, 'running')];
+          if (outcome.attemptId) {
+            guard.push(eq(deployments.attemptId, outcome.attemptId));
+          } else if (targetWorkerId) {
+            guard.push(eq(deployments.workerId, targetWorkerId));
+          }
+
+          const applied = await db
+            .update(deployments)
+            .set({
+              publicUrl: published.publicUrl,
+              routingStatus: 'ready',
+              routingError: null,
+              updatedAt: new Date(),
+            })
+            .returning({ id: deployments.id })
+            .where(and(...guard));
+
+          // If the attempt became stale while the gateway call was in flight,
+          // avoid leaving an orphaned route behind. Never remove a route for a
+          // newer running attempt.
+          if (applied.length === 0) {
+            const current = await db
+              .select({ state: deployments.state, workerId: deployments.workerId, attemptId: deployments.attemptId })
+              .from(deployments)
+              .where(eq(deployments.id, id));
+            const currentRow = current[0];
+            const replacedByNewAttempt =
+              currentRow?.state === 'running' &&
+              ((outcome.attemptId && currentRow.attemptId !== outcome.attemptId) ||
+                (!outcome.attemptId && currentRow.workerId !== targetWorkerId));
+            if (!replacedByNewAttempt) {
+              await gatewayClient.removeRoute(id);
+            }
           }
         } catch (gwErr) {
-          console.warn(`[InternalDeployments] Gateway route publication error for ${id}:`, gwErr);
+          const message = gwErr instanceof Error ? gwErr.message : String(gwErr);
+          console.warn(`[InternalDeployments] Gateway route publication error for ${id}:`, message);
+
+          // Keep the error attached to this attempt only; a later worker
+          // assignment must not be overwritten by an old publication failure.
+          const guard = [eq(deployments.id, id), eq(deployments.state, 'running')];
+          if (outcome.attemptId) {
+            guard.push(eq(deployments.attemptId, outcome.attemptId));
+          } else if (targetWorkerId) {
+            guard.push(eq(deployments.workerId, targetWorkerId));
+          }
+          await db
+            .update(deployments)
+            .set({ routingStatus: 'failed', routingError: message, updatedAt: new Date() })
+            .where(and(...guard));
         }
-      })();
+      })().catch((publicationErr) => {
+        console.warn(
+          `[InternalDeployments] Failed to persist gateway publication status for ${id}:`,
+          publicationErr instanceof Error ? publicationErr.message : String(publicationErr)
+        );
+      });
     } else if (outcome.state === 'stopped' || outcome.state === 'failed') {
       void gatewayClient.removeRoute(id);
     }

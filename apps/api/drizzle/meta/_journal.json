@@ -15,6 +15,13 @@
       "when": 1793464520150,
       "tag": "0002_soft_nitro",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793465131876,
+      "tag": "0003_worried_baron_zemo",
+      "breakpoints": true
     }
   ]
 }

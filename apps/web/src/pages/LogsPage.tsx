@@ -160,9 +160,19 @@ export function LogsPage() {
       </div>
 
       {isDeploymentsError && (
-        <DataError title="Unable to load deployments" error={deploymentsError} onRetry={() => void refetchDeployments()} />
+        <DataError
+          title="Unable to load deployments"
+          error={deploymentsError}
+          onRetry={() => void refetchDeployments()}
+        />
       )}
-      {isLogsError && <DataError title="Unable to load deployment logs" error={logsError} onRetry={() => void refetch()} />}
+      {isLogsError && (
+        <DataError
+          title="Unable to load deployment logs"
+          error={logsError}
+          onRetry={() => void refetch()}
+        />
+      )}
 
       {/* Main Terminal Shell */}
       <Card className="overflow-hidden border border-border shadow-md flex flex-col h-[74vh]">
@@ -208,7 +218,7 @@ export function LogsPage() {
               </span>
               <span>•</span>
               <span>Port :{activeDep.assignedPort || 'ephemeral'}</span>
-              {activeDep.publicUrl && (
+              {activeDep.routingStatus === 'ready' && activeDep.publicUrl && (
                 <>
                   <span>•</span>
                   <a
