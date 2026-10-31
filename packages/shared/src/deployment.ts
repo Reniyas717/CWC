@@ -29,6 +29,8 @@ export const DeploymentSchema = z.object({
   gitBranch: z.string().default('main'),
   state: DeploymentStateSchema,
   workerId: z.string().optional(),
+  /** Identity of the worker assignment that produced this state. */
+  attemptId: z.string().min(1).optional(),
   containerId: z.string().optional(),
   assignedPort: z.number().int().optional(),
   publicUrl: z.string().url().optional(),
@@ -48,6 +50,8 @@ export type DeploymentStatusResponse = z.infer<typeof DeploymentStatusResponseSc
 
 export const DeploymentTaskPayloadSchema = z.object({
   deploymentId: z.string().min(1),
+  /** Unique assignment identity generated when the control plane claims a task. */
+  attemptId: z.string().min(1).optional(),
   applicationId: z.string().min(1),
   git: z.object({
     repositoryUrl: z.string().url(),
@@ -90,6 +94,8 @@ export type DeploymentTaskResponse = z.infer<typeof DeploymentTaskResponseSchema
 export const DeploymentResultPayloadSchema = z.object({
   deploymentId: z.string().min(1),
   workerId: z.string().min(1),
+  /** Must match the current assignment, otherwise the result is stale. */
+  attemptId: z.string().min(1).optional(),
   state: z.enum(['running', 'failed', 'stopped']),
   containerId: z.string().optional(),
   assignedPort: z.number().int().optional(),

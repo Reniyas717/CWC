@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   DeploymentResultPayloadSchema,
   DeploymentLogsPayloadSchema,
@@ -41,9 +41,135 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
   const now = new Date();
 
   try {
-    const existing = await db.select().from(deployments).where(eq(deployments.id, id));
+    const outcome = await db.transaction(async (tx) => {
+      const locked = await tx
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, id))
+        .for('update');
+      const currentDep = locked[0];
 
-    if (existing.length === 0) {
+      if (!currentDep) {
+        return { kind: 'not-found' as const };
+      }
+
+      // A result is valid only for the worker and assignment currently stored
+      // on the deployment. An absent attempt id is accepted only for legacy
+      // rows that have not been claimed yet; claimed rows always require it.
+      const ownsAttempt =
+        payload.workerId === currentDep.workerId &&
+        (currentDep.attemptId
+          ? payload.attemptId === currentDep.attemptId
+          : !payload.attemptId);
+      if (
+        !ownsAttempt ||
+        currentDep.state === 'cancelled'
+      ) {
+        return {
+          kind: 'stale' as const,
+          state: currentDep.state,
+          attemptId: currentDep.attemptId,
+        };
+      }
+
+      // Duplicate delivery is an acknowledgement, not a second lifecycle
+      // transition. In particular it must not increment activeContainers twice.
+      if (currentDep.state === payload.state) {
+        return {
+          kind: 'duplicate' as const,
+          state: currentDep.state,
+          workerId: currentDep.workerId,
+          assignedPort: currentDep.assignedPort,
+        };
+      }
+
+      // A terminal attempt cannot transition again. Same-state delivery was
+      // handled above as an idempotent duplicate.
+      if (currentDep.state === 'failed' || currentDep.state === 'stopped') {
+        return {
+          kind: 'stale' as const,
+          state: currentDep.state,
+          attemptId: currentDep.attemptId,
+        };
+      }
+
+      const startedAt =
+        payload.state === 'running' ? currentDep.startedAt || now : currentDep.startedAt;
+      const finishedAt =
+        payload.state === 'failed' || payload.state === 'stopped' ? now : currentDep.finishedAt;
+
+      const updated = await tx
+        .update(deployments)
+        .set({
+          state: payload.state,
+          containerId: payload.containerId ?? currentDep.containerId,
+          assignedPort: payload.assignedPort ?? currentDep.assignedPort,
+          publicUrl: payload.publicUrl ?? currentDep.publicUrl,
+          gitCommitHash: payload.gitCommitHash ?? currentDep.gitCommitHash,
+          errorMessage: payload.errorMessage ?? null,
+          startedAt,
+          finishedAt,
+          updatedAt: now,
+        })
+        .where(
+          eq(deployments.id, id)
+        )
+        .returning();
+
+      if (updated.length === 0) {
+        return { kind: 'stale' as const, state: currentDep.state, attemptId: currentDep.attemptId };
+      }
+
+      const eventType =
+        payload.state === 'running'
+          ? 'CONTAINER_START'
+          : payload.state === 'failed'
+            ? 'FAILED'
+            : 'STOPPED';
+      await tx.insert(deploymentEvents).values({
+        deploymentId: id,
+        eventType,
+        details:
+          payload.errorMessage ||
+          `Container ${payload.state} on port ${payload.assignedPort || 'N/A'}`,
+        timestamp: now,
+      });
+
+      // Only the first running report reserves a container. Terminal reports
+      // release that reservation once, even if they race with another report.
+      if (payload.state === 'running' && currentDep.workerId) {
+        await tx
+          .update(workerNodes)
+          .set({
+            activeContainers: sql`active_containers + 1`,
+            state: 'busy',
+            lastHeartbeatAt: now,
+          })
+          .where(eq(workerNodes.id, currentDep.workerId));
+      } else if (
+        (payload.state === 'stopped' || payload.state === 'failed') &&
+        currentDep.state === 'running' &&
+        currentDep.workerId
+      ) {
+        await tx
+          .update(workerNodes)
+          .set({
+            activeContainers: sql`GREATEST(0, active_containers - 1)`,
+            lastHeartbeatAt: now,
+          })
+          .where(eq(workerNodes.id, currentDep.workerId));
+      }
+
+      return {
+        kind: 'applied' as const,
+        state: payload.state,
+        workerId: currentDep.workerId,
+        assignedPort: payload.assignedPort,
+        attemptId: currentDep.attemptId,
+      };
+    });
+
+    if (outcome.kind === 'not-found') {
       res.status(404).json({
         success: false,
         error: {
@@ -54,85 +180,30 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
       return;
     }
 
-    const currentDep = existing[0];
-
-    // Guard against race conditions: if already cancelled, ignore stale running reports
-    if (currentDep.state === 'cancelled' && payload.state === 'running') {
-      res.status(200).json({
-        success: true,
+    if (outcome.kind === 'stale') {
+      res.status(409).json({
+        success: false,
         acknowledged: true,
+        stale: true,
         deploymentId: id,
-        state: 'cancelled',
+        state: outcome.state,
+        error: {
+          code: 'STALE_DEPLOYMENT_RESULT',
+          message: 'Deployment result belongs to an obsolete worker assignment or cancelled deployment',
+        },
       });
       return;
     }
 
-    // Determine startedAt and finishedAt timestamps
-    const startedAt =
-      payload.state === 'running' ? currentDep.startedAt || now : currentDep.startedAt;
-    const finishedAt =
-      payload.state === 'failed' || payload.state === 'stopped' ? now : currentDep.finishedAt;
-
-    // Initial publicUrl from worker payload or fallback
-    const publicUrl = payload.publicUrl ?? currentDep.publicUrl;
-
-    // Update deployment state and runtime properties immediately
-    await db
-      .update(deployments)
-      .set({
-        state: payload.state,
-        containerId: payload.containerId ?? currentDep.containerId,
-        assignedPort: payload.assignedPort ?? currentDep.assignedPort,
-        publicUrl,
-        gitCommitHash: payload.gitCommitHash ?? currentDep.gitCommitHash,
-        errorMessage: payload.errorMessage ?? null,
-        startedAt,
-        finishedAt,
-        updatedAt: now,
-      })
-      .where(eq(deployments.id, id));
-
-    // Record discrete lifecycle event
-    const eventType =
-      payload.state === 'running'
-        ? 'CONTAINER_START'
-        : payload.state === 'failed'
-          ? 'FAILED'
-          : 'STOPPED';
-
-    await db.insert(deploymentEvents).values({
-      deploymentId: id,
-      eventType,
-      details:
-        payload.errorMessage ||
-        `Container ${payload.state} on port ${payload.assignedPort || 'N/A'}`,
-      timestamp: now,
-    });
-
-    // Update worker active containers count
-    if (payload.state === 'running' && payload.workerId) {
-      await db
-        .update(workerNodes)
-        .set({
-          activeContainers: sql`active_containers + 1`,
-          state: 'busy',
-          lastHeartbeatAt: now,
-        })
-        .where(eq(workerNodes.id, payload.workerId));
-    } else if (
-      (payload.state === 'stopped' || payload.state === 'failed') &&
-      currentDep.state === 'running'
-    ) {
-      const targetWorkerId = payload.workerId || currentDep.workerId;
-      if (targetWorkerId) {
-        await db
-          .update(workerNodes)
-          .set({
-            activeContainers: sql`GREATEST(0, active_containers - 1)`,
-            lastHeartbeatAt: now,
-          })
-          .where(eq(workerNodes.id, targetWorkerId));
-      }
+    if (outcome.kind === 'duplicate') {
+      res.status(200).json({
+        success: true,
+        acknowledged: true,
+        duplicate: true,
+        deploymentId: id,
+        state: outcome.state,
+      });
+      return;
     }
 
     // Respond immediately to worker to avoid request timeouts
@@ -140,12 +211,12 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
       success: true,
       acknowledged: true,
       deploymentId: id,
-      state: payload.state,
+      state: outcome.state,
     });
 
     // Publish or remove Gateway route asynchronously in background
-    if (payload.state === 'running' && payload.assignedPort) {
-      const targetWorkerId = payload.workerId || currentDep.workerId;
+    if (outcome.state === 'running' && outcome.assignedPort) {
+      const targetWorkerId = outcome.workerId;
       void (async () => {
         try {
           let upstreamIp = '127.0.0.1';
@@ -162,7 +233,7 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
           const published = await gatewayClient.publishRoute(
             id,
             upstreamIp,
-            payload.assignedPort!,
+            outcome.assignedPort!,
             '/'
           );
 
@@ -173,13 +244,21 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
                 publicUrl: published.publicUrl,
                 updatedAt: new Date(),
               })
-              .where(eq(deployments.id, id));
+              .where(
+                and(
+                  eq(deployments.id, id),
+                  eq(deployments.state, 'running'),
+                  outcome.attemptId
+                    ? eq(deployments.attemptId, outcome.attemptId)
+                    : eq(deployments.workerId, targetWorkerId ?? '')
+                )
+              );
           }
         } catch (gwErr) {
           console.warn(`[InternalDeployments] Gateway route publication error for ${id}:`, gwErr);
         }
       })();
-    } else if (payload.state === 'stopped' || payload.state === 'failed') {
+    } else if (outcome.state === 'stopped' || outcome.state === 'failed') {
       void gatewayClient.removeRoute(id);
     }
   } catch (error) {

@@ -118,6 +118,9 @@ export const deployments = pgTable('deployments', {
   workerId: varchar('worker_id', { length: 128 }).references(() => workerNodes.id, {
     onDelete: 'set null',
   }),
+    // Unique identity for the current worker assignment. Reassigned attempts
+    // receive a new value so delayed reports cannot revive old work.
+    attemptId: varchar('attempt_id', { length: 128 }),
   version: integer('version').notNull().default(1),
   gitCommitHash: varchar('git_commit_hash', { length: 64 }),
   gitBranch: varchar('git_branch', { length: 128 }).notNull().default('main'),

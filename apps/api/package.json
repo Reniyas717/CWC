@@ -18,6 +18,7 @@
     "test:phase5": "node test-phase5.js",
     "test:phase6": "node test-phase6.js",
     "test:task-claim": "node test-task-claim.js",
+    "test:result-ownership": "node test-result-ownership.js",
     "test:all": "node test-auth.js && node test-phase4.js && node test-phase5.js && node test-phase6.js"
   },
   "dependencies": {

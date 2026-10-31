@@ -46,6 +46,7 @@ function mapDeploymentRow(row: typeof deployments.$inferSelect): Deployment {
     gitBranch: row.gitBranch,
     state: row.state,
     workerId: row.workerId ?? undefined,
+    attemptId: row.attemptId ?? undefined,
     containerId: row.containerId ?? undefined,
     assignedPort: row.assignedPort ?? undefined,
     publicUrl: row.publicUrl ?? undefined,
@@ -386,6 +387,9 @@ deploymentsRouter.post('/:id/cancel', requireAdmin, async (req: Request, res: Re
       .update(deployments)
       .set({
         state: 'cancelled',
+        // Invalidate the worker's assignment before notifying it. Any result
+        // already in flight now fails the attempt-identity check.
+        attemptId: null,
         finishedAt: now,
         updatedAt: now,
       })
