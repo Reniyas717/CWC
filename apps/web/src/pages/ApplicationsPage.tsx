@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { DataError } from '@/components/ui/data-error';
 
 export function ApplicationsPage() {
   const queryClient = useQueryClient();
@@ -32,13 +33,23 @@ export function ApplicationsPage() {
   const [selectedFramework, setSelectedFramework] = React.useState<string>('all');
   const [actionSuccess, setActionSuccess] = React.useState<string | null>(null);
 
-  const { data: apps = [], isLoading } = useQuery<AppConfig[]>({
+  const {
+    data: apps = [],
+    isLoading,
+    isError: isAppsError,
+    error: appsError,
+    refetch: refetchApps,
+  } = useQuery<AppConfig[]>({
     queryKey: ['applications'],
     queryFn: () => api.getApplications(),
     refetchInterval: 10000,
   });
 
-  const { data: deployments = [] } = useQuery<Deployment[]>({
+  const {
+    data: deployments = [],
+    isError: isDeploymentsError,
+    error: deploymentsError,
+  } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
@@ -51,6 +62,7 @@ export function ApplicationsPage() {
       setActionSuccess(`Deployment ${dep.id} initiated on peer cluster.`);
       setTimeout(() => setActionSuccess(null), 4000);
     },
+    onError: (error: Error) => setActionSuccess(`Redeploy failed: ${error.message}`),
   });
 
   const cancelMutation = useMutation({
@@ -60,6 +72,7 @@ export function ApplicationsPage() {
       setActionSuccess('Workload deployment cancelled.');
       setTimeout(() => setActionSuccess(null), 4000);
     },
+    onError: (error: Error) => setActionSuccess(`Cancellation failed: ${error.message}`),
   });
 
   // Filter apps
@@ -87,31 +100,46 @@ export function ApplicationsPage() {
     switch (framework) {
       case 'nodejs':
         return (
-          <Badge variant="outline" className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10">
+          <Badge
+            variant="outline"
+            className="text-emerald-600 dark:text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
+          >
             Node.js
           </Badge>
         );
       case 'python':
         return (
-          <Badge variant="outline" className="text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10">
+          <Badge
+            variant="outline"
+            className="text-blue-600 dark:text-blue-400 border-blue-500/30 bg-blue-500/10"
+          >
             Python
           </Badge>
         );
       case 'static':
         return (
-          <Badge variant="outline" className="text-purple-600 dark:text-purple-400 border-purple-500/30 bg-purple-500/10">
+          <Badge
+            variant="outline"
+            className="text-purple-600 dark:text-purple-400 border-purple-500/30 bg-purple-500/10"
+          >
             Static Web
           </Badge>
         );
       case 'dockerfile':
         return (
-          <Badge variant="outline" className="text-sky-600 dark:text-sky-400 border-sky-500/30 bg-sky-500/10">
+          <Badge
+            variant="outline"
+            className="text-sky-600 dark:text-sky-400 border-sky-500/30 bg-sky-500/10"
+          >
             Dockerfile
           </Badge>
         );
       case 'go':
         return (
-          <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10">
+          <Badge
+            variant="outline"
+            className="text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10"
+          >
             Go
           </Badge>
         );
@@ -186,41 +214,51 @@ export function ApplicationsPage() {
       </div>
 
       {actionSuccess && (
-        <div className="p-3 bg-secondary/80 border border-border rounded-md text-foreground text-xs flex items-center justify-between gap-2">
+        <div
+          className={`p-3 border rounded-md text-xs flex items-center justify-between gap-2 ${actionSuccess.includes('failed') ? 'bg-destructive/10 border-destructive/20 text-destructive' : 'bg-secondary/80 border-border text-foreground'}`}
+        >
           <span>{actionSuccess}</span>
           <span className="text-[10px] font-mono text-muted-foreground">Cluster Sync</span>
         </div>
       )}
 
+      {isAppsError ? (
+        <DataError error={appsError} onRetry={() => void refetchApps()} />
+      ) : isDeploymentsError ? (
+        <DataError title="Unable to load deployment state" error={deploymentsError} />
+      ) : null}
+
       {/* Summary Metrics Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Registered Workloads</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Registered Workloads
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <div className="text-xl font-bold text-foreground">
-              {apps.length}
-            </div>
+            <div className="text-xl font-bold text-foreground">{apps.length}</div>
             <p className="text-[11px] text-muted-foreground">Configured Git repositories</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Active Replicas</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Active Replicas
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <div className="text-xl font-bold text-foreground">
-              {totalReplicas}
-            </div>
+            <div className="text-xl font-bold text-foreground">{totalReplicas}</div>
             <p className="text-[11px] text-muted-foreground">Distributed container tasks</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Aggregated RAM Cap</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Aggregated RAM Cap
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
             <div className="text-xl font-bold text-foreground">
@@ -232,12 +270,12 @@ export function ApplicationsPage() {
 
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Ingress Gateway</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">
+              Ingress Gateway
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
-            <div className="text-xl font-bold text-foreground">
-              Caddy + Quick Tunnel
-            </div>
+            <div className="text-xl font-bold text-foreground">Caddy + Quick Tunnel</div>
             <p className="text-[11px] text-muted-foreground">Dynamic upstream proxy</p>
           </CardContent>
         </Card>
@@ -298,14 +336,10 @@ export function ApplicationsPage() {
             </div>
             <CardTitle className="text-base">No Matching Applications</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Deploy your first Git repository to begin distributing container workloads across connected
-              developer laptops.
+              Deploy your first Git repository to begin distributing container workloads across
+              connected developer laptops.
             </p>
-            <Button
-              onClick={() => setIsModalOpen(true)}
-              size="sm"
-              className="mt-2 text-xs"
-            >
+            <Button onClick={() => setIsModalOpen(true)} size="sm" className="mt-2 text-xs">
               <Plus className="h-3.5 w-3.5 mr-1" />
               Deploy Application
             </Button>
@@ -322,10 +356,7 @@ export function ApplicationsPage() {
               latestDep.state === 'cancelled';
 
             return (
-              <Card
-                key={app.id}
-                className="hover:border-foreground/20 transition-all"
-              >
+              <Card key={app.id} className="hover:border-foreground/20 transition-all">
                 <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   {/* Left: App Identity & Git Source */}
                   <div className="space-y-2 min-w-0">
@@ -379,7 +410,7 @@ export function ApplicationsPage() {
                     </div>
 
                     {/* Live Public URL */}
-                    {latestDep?.publicUrl && (
+                    {latestDep?.routingStatus === 'ready' && latestDep.publicUrl && (
                       <div className="pt-1 flex items-center gap-2 flex-wrap">
                         <a
                           href={latestDep.publicUrl}
@@ -420,9 +451,7 @@ export function ApplicationsPage() {
                       className="text-xs h-8 px-2.5 flex items-center gap-1"
                     >
                       <RotateCw
-                        className={`h-3 w-3 ${
-                          redeployMutation.isPending ? 'animate-spin' : ''
-                        }`}
+                        className={`h-3 w-3 ${redeployMutation.isPending ? 'animate-spin' : ''}`}
                       />
                       <span>Redeploy</span>
                     </Button>

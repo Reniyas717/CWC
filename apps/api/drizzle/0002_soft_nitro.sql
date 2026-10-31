@@ -1,0 +1,1 @@
+ALTER TABLE "deployments" ADD COLUMN "attempt_id" varchar(128);

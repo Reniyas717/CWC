@@ -2,6 +2,7 @@ import {
   AppConfig,
   CreateAppInput,
   Deployment,
+  DeploymentSchema,
   DeploymentLogEntry,
   WorkerNode,
 } from '@cloud-without-clouds/shared';
@@ -9,9 +10,50 @@ import {
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'cwc-admin-token-super-secret-dev';
 
+export class ApiRequestError extends Error {
+  readonly status?: number;
+  readonly code?: string;
+
+  constructor(message: string, status?: number, code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+type ApiResponse<T> = {
+  data?: T;
+  error?: {
+    code?: string;
+    message?: string;
+  };
+};
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<ApiResponse<T>> {
+  let response: Response;
+
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Network request failed';
+    throw new ApiRequestError(`Control plane unavailable: ${message}`, 0, 'NETWORK_ERROR');
+  }
+
+  const body = (await response.json().catch(() => ({}))) as ApiResponse<T>;
+  if (!response.ok) {
+    throw new ApiRequestError(
+      body.error?.message || `Control plane request failed (${response.status})`,
+      response.status,
+      body.error?.code
+    );
+  }
+
+  return body;
+}
+
 const STORAGE_KEY_APPS = 'cwc_applications_registry_v1';
 const STORAGE_KEY_DEPS = 'cwc_deployments_registry_v1';
-const STORAGE_KEY_LOGS = 'cwc_deployment_logs_registry_v1';
 
 export interface WorkerScoreBreakdown {
   workerId: string;
@@ -69,6 +111,25 @@ export interface ClusterRebalanceResult {
   workerStats: WorkerBalanceStat[];
   dryRun: boolean;
   executedAt: string;
+}
+
+async function getApiErrorMessage(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body === 'object' && body !== null && 'error' in body) {
+      const error = body.error;
+      if (typeof error === 'object' && error !== null && 'message' in error) {
+        const message = error.message;
+        if (typeof message === 'string' && message.trim()) {
+          return message;
+        }
+      }
+    }
+  } catch {
+    // Some proxies return an empty or non-JSON error response.
+  }
+
+  return `Control plane rejected the deployment request (HTTP ${response.status}).`;
 }
 
 // Initial realistic applications
@@ -132,6 +193,7 @@ const INITIAL_DEPLOYMENTS: Deployment[] = [
     containerId: 'cwc-cnt-a912f4b',
     assignedPort: 20015,
     publicUrl: 'https://express-api-gateway.trycloudflare.com',
+    routingStatus: 'ready',
     createdAt: new Date(Date.now() - 1200000).toISOString(),
     updatedAt: new Date(Date.now() - 1180000).toISOString(),
     startedAt: new Date(Date.now() - 1195000).toISOString(),
@@ -147,84 +209,12 @@ const INITIAL_DEPLOYMENTS: Deployment[] = [
     containerId: 'cwc-cnt-b823e5a',
     assignedPort: 20016,
     publicUrl: 'https://peer-mesh-status.trycloudflare.com',
+    routingStatus: 'ready',
     createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
     updatedAt: new Date(Date.now() - 3600000 * 2 + 15000).toISOString(),
     startedAt: new Date(Date.now() - 3600000 * 2 + 10000).toISOString(),
   },
 ];
-
-function generateRealisticLogs(
-  depId: string,
-  branch = 'main',
-  hash = 'f4b98c2'
-): DeploymentLogEntry[] {
-  const baseTime = Date.now() - 60000;
-  return [
-    {
-      id: `${depId}-1`,
-      timestamp: new Date(baseTime).toISOString(),
-      level: 'info',
-      stream: 'system',
-      message: `[ControlPlane] Received task dispatch request for deployment '${depId}'.`,
-    },
-    {
-      id: `${depId}-2`,
-      timestamp: new Date(baseTime + 1200).toISOString(),
-      level: 'info',
-      stream: 'system',
-      message: `[Scheduler] Evaluated candidate worker nodes using load score formula S(W). Assigned to lowest-load worker.`,
-    },
-    {
-      id: `${depId}-3`,
-      timestamp: new Date(baseTime + 2800).toISOString(),
-      level: 'info',
-      stream: 'stdout',
-      message: `[GitRunner] Cloning repository (shallow branch '${branch}' @ ${hash}) into isolated build context...`,
-    },
-    {
-      id: `${depId}-4`,
-      timestamp: new Date(baseTime + 4100).toISOString(),
-      level: 'info',
-      stream: 'stdout',
-      message: `[GitRunner] Verified build integrity. Rejection checks passed (no path traversal, valid remote).`,
-    },
-    {
-      id: `${depId}-5`,
-      timestamp: new Date(baseTime + 5500).toISOString(),
-      level: 'info',
-      stream: 'stdout',
-      message: `[DockerEngine] Building container image: step 1/5 FROM node:20-alpine AS runner`,
-    },
-    {
-      id: `${depId}-6`,
-      timestamp: new Date(baseTime + 7200).toISOString(),
-      level: 'info',
-      stream: 'stdout',
-      message: `[DockerEngine] Injecting sandbox kernel limits: memory=512m, cpus=1.0, pids-limit=256`,
-    },
-    {
-      id: `${depId}-7`,
-      timestamp: new Date(baseTime + 9100).toISOString(),
-      level: 'info',
-      stream: 'stdout',
-      message: `[DockerEngine] Dynamic ephemeral port allocated: container exposed on host port.`,
-    },
-    {
-      id: `${depId}-8`,
-      timestamp: new Date(baseTime + 11400).toISOString(),
-      level: 'info',
-      stream: 'system',
-      message: `[HealthCheck] Probing HTTP GET / ... Status 200 OK (22ms). Container declared ready.`,
-    },
-    {
-      id: `${depId}-9`,
-      timestamp: new Date(baseTime + 12800).toISOString(),
-      level: 'info',
-      stream: 'system',
-      message: `[GatewayClient] Route published on Caddy upstream & Cloudflare Quick Tunnel active.`,
-    },
-  ];
-}
 
 function loadLocalApps(): AppConfig[] {
   try {
@@ -268,24 +258,6 @@ function saveLocalDeployments(deps: Deployment[]): void {
   }
 }
 
-function loadLocalLogs(depId: string): DeploymentLogEntry[] {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_KEY_LOGS}_${depId}`);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch {
-    // fallback
-  }
-  const generated = generateRealisticLogs(depId);
-  try {
-    localStorage.setItem(`${STORAGE_KEY_LOGS}_${depId}`, JSON.stringify(generated));
-  } catch {
-    // ignore
-  }
-  return generated;
-}
-
 export const api = {
   getAuthHeaders(): Record<string, string> {
     return {
@@ -298,49 +270,10 @@ export const api = {
    * Retrieves all configured applications.
    */
   async getApplications(): Promise<AppConfig[]> {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/deployments`, {
-        headers: this.getAuthHeaders(),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json?.data) && json.data.length > 0) {
-          // Map deployments to unique application records
-          const appMap = new Map<string, AppConfig>();
-          for (const dep of json.data) {
-            if (!appMap.has(dep.applicationId)) {
-              appMap.set(dep.applicationId, {
-                id: dep.applicationId,
-                name: dep.applicationId.replace(/^app-/, '').replace(/-/g, ' ').toUpperCase(),
-                slug: dep.applicationId.replace(/^app-/, ''),
-                framework: 'dockerfile',
-                git: {
-                  repositoryUrl: 'https://github.com/cloud-without-clouds/demo.git',
-                  branch: dep.gitBranch || 'main',
-                  rootDirectory: '/',
-                  commitHash: dep.gitCommitHash,
-                },
-                port: dep.assignedPort || 3000,
-                replicas: 1,
-                env: [],
-                resourceLimits: {
-                  cpuLimitCores: 1.0,
-                  memoryLimitMb: 512,
-                },
-                createdAt: dep.createdAt,
-                updatedAt: dep.updatedAt,
-              });
-            }
-          }
-          if (appMap.size > 0) {
-            return Array.from(appMap.values());
-          }
-        }
-      }
-    } catch {
-      // API initializing or offline
-    }
-    return loadLocalApps();
+    const json = await requestJson<AppConfig[]>(`${API_URL}/api/v1/applications`, {
+      headers: this.getAuthHeaders(),
+    });
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   /**
@@ -364,8 +297,6 @@ export const api = {
       updatedAt: new Date().toISOString(),
     };
 
-    let serverDeployment: Deployment | null = null;
-
     try {
       const payload = {
         name: input.name,
@@ -386,147 +317,81 @@ export const api = {
         body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.data) {
-          serverDeployment = json.data;
-        }
+      if (!res.ok) {
+        throw new ApiRequestError(await getApiErrorMessage(res), res.status);
       }
-    } catch {
-      // offline fallback
+
+      const json: unknown = await res.json();
+      const data =
+        typeof json === 'object' && json !== null && 'data' in json ? json.data : undefined;
+      const parsedDeployment = DeploymentSchema.safeParse(data);
+      if (!parsedDeployment.success) {
+        throw new ApiRequestError('Control plane returned an invalid deployment response.');
+      }
+
+      const serverDeployment: Deployment = parsedDeployment.data;
+
+      // Keep the locally cached application linked to the server-created
+      // application ID. The deployment ID/state shown after submission must
+      // come from the control plane, not from a dashboard-generated record.
+      const persistedApp: AppConfig = {
+        ...newApp,
+        id: serverDeployment.applicationId,
+      };
+
+      const currentApps = loadLocalApps();
+      saveLocalApps([persistedApp, ...currentApps]);
+
+      const currentDeps = loadLocalDeployments();
+      saveLocalDeployments([serverDeployment, ...currentDeps]);
+
+      return persistedApp;
+    } catch (error) {
+      if (error instanceof ApiRequestError) {
+        throw error;
+      }
+
+      const message =
+        error instanceof Error && error.message
+          ? `Unable to reach the control plane: ${error.message}`
+          : 'Unable to reach the control plane. Check that the API is running and try again.';
+      throw new ApiRequestError(message);
     }
-
-    // Persist in local storage
-    const currentApps = loadLocalApps();
-    saveLocalApps([newApp, ...currentApps]);
-
-    const createdDeployment: Deployment = serverDeployment || {
-      id: `dep-${Date.now().toString(36)}`,
-      applicationId: newApp.id,
-      version: 1,
-      gitCommitHash: newApp.git.commitHash || 'a1b2c3d',
-      gitBranch: newApp.git.branch,
-      state: 'running',
-      workerId: 'worker-node-local-01',
-      containerId: `cwc-cnt-${Math.random().toString(36).substring(2, 9)}`,
-      assignedPort: 20000 + Math.floor(Math.random() * 5000),
-      publicUrl: `https://${newApp.slug}.trycloudflare.com`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-    };
-
-    const currentDeps = loadLocalDeployments();
-    saveLocalDeployments([createdDeployment, ...currentDeps]);
-
-    return newApp;
   },
 
   /**
    * Retrieves all deployments (optionally filtered by applicationId).
    */
   async getDeployments(applicationId?: string): Promise<Deployment[]> {
-    try {
-      const url = applicationId
-        ? `${API_URL}/api/v1/deployments?applicationId=${encodeURIComponent(applicationId)}`
-        : `${API_URL}/api/v1/deployments`;
-
-      const res = await fetch(url, { headers: this.getAuthHeaders() });
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json?.data)) {
-          return json.data;
-        }
-      }
-    } catch {
-      // fallback
-    }
-
-    const all = loadLocalDeployments();
-    if (applicationId) {
-      return all.filter((d) => d.applicationId === applicationId);
-    }
-    return all;
+    const url = applicationId
+      ? `${API_URL}/api/v1/deployments?applicationId=${encodeURIComponent(applicationId)}`
+      : `${API_URL}/api/v1/deployments`;
+    const json = await requestJson<Deployment[]>(url, { headers: this.getAuthHeaders() });
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   /**
    * Retrieves live or cached deployment logs.
    */
   async getDeploymentLogs(deploymentId: string): Promise<DeploymentLogEntry[]> {
-    try {
-      const res = await fetch(
-        `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/logs`,
-        {
-          headers: this.getAuthHeaders(),
-        }
-      );
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json?.data) && json.data.length > 0) {
-          return json.data;
-        }
-      }
-    } catch {
-      // fallback
-    }
-    return loadLocalLogs(deploymentId);
+    const json = await requestJson<DeploymentLogEntry[]>(
+      `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/logs`,
+      { headers: this.getAuthHeaders() }
+    );
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   /**
    * Cancels an active or queued deployment.
    */
   async cancelDeployment(deploymentId: string): Promise<boolean> {
-    try {
-      const res = await fetch(
-        `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/cancel`,
-        {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-        }
-      );
-      if (res.ok) {
-        // Also update local cache
-        const deps = loadLocalDeployments();
-        const updated = deps.map((d) =>
-          d.id === deploymentId
-            ? { ...d, state: 'cancelled' as const, finishedAt: new Date().toISOString() }
-            : d
-        );
-        saveLocalDeployments(updated);
-        return true;
+    await requestJson<unknown>(
+      `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/cancel`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
       }
-    } catch {
-      // fallback update
-    }
-
-    // Local fallback update
-    const deps = loadLocalDeployments();
-    const updated = deps.map((d) =>
-      d.id === deploymentId
-        ? { ...d, state: 'cancelled' as const, finishedAt: new Date().toISOString() }
-        : d
     );
-    saveLocalDeployments(updated);
-
-    // Append cancellation log entry
-    const existingLogs = loadLocalLogs(deploymentId);
-    const cancelLog: DeploymentLogEntry = {
-      id: `${deploymentId}-cancel`,
-      timestamp: new Date().toISOString(),
-      level: 'warn',
-      stream: 'system',
-      message:
-        '[ControlPlane] Deployment cancelled by operator. Container teardown signal dispatched.',
-    };
-    try {
-      localStorage.setItem(
-        `${STORAGE_KEY_LOGS}_${deploymentId}`,
-        JSON.stringify([...existingLogs, cancelLog])
-      );
-    } catch {
-      // ignore
-    }
-
     return true;
   },
 
@@ -534,225 +399,67 @@ export const api = {
    * Triggers redeployment of an existing application.
    */
   async triggerRedeploy(applicationId: string): Promise<Deployment> {
-    const apps = loadLocalApps();
+    const apps = await this.getApplications();
     const targetApp = apps.find((a) => a.id === applicationId);
 
-    try {
-      if (targetApp) {
-        const payload = {
-          name: targetApp.name,
-          slug: targetApp.slug,
-          framework: targetApp.framework,
-          git: targetApp.git,
-          port: targetApp.port,
-          env: targetApp.env,
-          resourceLimits: targetApp.resourceLimits,
-          applicationId: targetApp.id,
-        };
-
-        const res = await fetch(`${API_URL}/api/v1/deployments`, {
-          method: 'POST',
-          headers: this.getAuthHeaders(),
-          body: JSON.stringify(payload),
-        });
-
-        if (res.ok) {
-          const json = await res.json();
-          if (json?.data) {
-            return json.data;
-          }
-        }
-      }
-    } catch {
-      // fallback
+    if (!targetApp) {
+      throw new ApiRequestError(`Application '${applicationId}' was not found`, 404, 'NOT_FOUND');
     }
 
-    const newDep: Deployment = {
-      id: `dep-${Date.now().toString(36)}`,
-      applicationId,
-      version: 2,
-      gitCommitHash: '9e8d7c6',
-      gitBranch: targetApp?.git.branch || 'main',
-      state: 'running',
-      workerId: 'worker-node-local-01',
-      containerId: `cwc-cnt-${Math.random().toString(36).substring(2, 9)}`,
-      assignedPort: 20000 + Math.floor(Math.random() * 5000),
-      publicUrl: `https://${targetApp?.slug || 'app'}-latest.trycloudflare.com`,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-    };
+    const json = await requestJson<Deployment>(`${API_URL}/api/v1/deployments`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({
+        name: targetApp.name,
+        slug: targetApp.slug,
+        framework: targetApp.framework,
+        git: targetApp.git,
+        port: targetApp.port,
+        env: targetApp.env,
+        resourceLimits: targetApp.resourceLimits,
+        applicationId: targetApp.id,
+      }),
+    });
 
-    const current = loadLocalDeployments();
-    saveLocalDeployments([newDep, ...current]);
-    return newDep;
+    if (!json.data) {
+      throw new ApiRequestError('Control plane did not return the new deployment', 502, 'INVALID_RESPONSE');
+    }
+    return json.data;
   },
 
   /**
-   * Retrieves worker nodes across the cluster mesh.
+   * Retrieves worker nodes.
    */
   async getWorkers(): Promise<WorkerNode[]> {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/workers`, {
-        headers: this.getAuthHeaders(),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json?.data) && json.data.length > 0) {
-          return json.data;
-        }
-      }
-    } catch {
-      // fallback
-    }
-
-    return [
-      {
-        id: 'worker-node-local-01',
-        name: 'Workstation Alpha (Primary Desktop)',
-        hostname: 'node-alpha-desktop',
-        ipAddress: '100.64.0.10',
-        port: 5001,
-        state: 'busy',
-        resources: {
-          cpuCount: 16,
-          cpuUsagePercent: 28.5,
-          totalMemoryMb: 16384,
-          freeMemoryMb: 11264,
-          usedMemoryMb: 5120,
-          activeContainers: 2,
-        },
-        limits: {
-          maxConcurrentWorkloads: 6,
-          maxMemoryMb: 12288,
-          maxCpuCores: 8,
-        },
-        version: '0.1.0',
-        registeredAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-        lastHeartbeatAt: new Date().toISOString(),
-      },
-      {
-        id: 'worker-node-laptop-02',
-        name: 'MacBook Pro M2 (Developer Laptop)',
-        hostname: 'node-beta-macbook',
-        ipAddress: '100.64.0.11',
-        port: 5001,
-        state: 'busy',
-        resources: {
-          cpuCount: 8,
-          cpuUsagePercent: 18.0,
-          totalMemoryMb: 8192,
-          freeMemoryMb: 5632,
-          usedMemoryMb: 2560,
-          activeContainers: 1,
-        },
-        limits: {
-          maxConcurrentWorkloads: 4,
-          maxMemoryMb: 6144,
-          maxCpuCores: 4,
-        },
-        version: '0.1.0',
-        registeredAt: new Date(Date.now() - 3600000 * 18).toISOString(),
-        lastHeartbeatAt: new Date().toISOString(),
-      },
-      {
-        id: 'worker-node-mini-03',
-        name: 'ThinkCentre ThinNode (Edge Worker)',
-        hostname: 'node-gamma-thin',
-        ipAddress: '100.64.0.12',
-        port: 5001,
-        state: 'idle',
-        resources: {
-          cpuCount: 4,
-          cpuUsagePercent: 8.5,
-          totalMemoryMb: 4096,
-          freeMemoryMb: 3072,
-          usedMemoryMb: 1024,
-          activeContainers: 1,
-        },
-        limits: {
-          maxConcurrentWorkloads: 2,
-          maxMemoryMb: 3072,
-          maxCpuCores: 2,
-        },
-        version: '0.1.0',
-        registeredAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-        lastHeartbeatAt: new Date().toISOString(),
-      },
-    ];
+    const json = await requestJson<WorkerNode[]>(`${API_URL}/api/v1/workers`, {
+      headers: this.getAuthHeaders(),
+    });
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   /**
    * Retrieves real-time scheduler placement scores S(W) across all worker nodes.
    */
   async getWorkerScores(memoryMb = 512): Promise<WorkerScoreBreakdown[]> {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/workers/scores?memoryMb=${memoryMb}`, {
-        headers: this.getAuthHeaders(),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (Array.isArray(json?.data) && json.data.length > 0) {
-          return json.data;
-        }
-      }
-    } catch {
-      // fallback
-    }
-
-    // Dynamic fallback calculating S(W) = (0.4 * mem) + (0.4 * cpu) + (0.2 * cont)
-    const workers = await this.getWorkers();
-    return workers.map((w) => {
-      const memRatio = (w.resources?.usedMemoryMb ?? 0) / (w.resources?.totalMemoryMb ?? 1);
-      const cpuRatio = (w.resources?.cpuUsagePercent ?? 0) / 100;
-      const contRatio =
-        (w.resources?.activeContainers ?? 0) / (w.limits?.maxConcurrentWorkloads ?? 4);
-      const score = Number((0.4 * memRatio + 0.4 * cpuRatio + 0.2 * contRatio).toFixed(4));
-
-      return {
-        workerId: w.id,
-        name: w.name,
-        score,
-        memoryRatio: Number(memRatio.toFixed(3)),
-        cpuRatio: Number(cpuRatio.toFixed(3)),
-        containerRatio: Number(contRatio.toFixed(3)),
-        freeMemoryMb: w.resources?.freeMemoryMb ?? 8000,
-        usedMemoryMb: w.resources?.usedMemoryMb ?? 4000,
-        totalMemoryMb: w.resources?.totalMemoryMb ?? 16384,
-        cpuUsagePercent: w.resources?.cpuUsagePercent ?? 20,
-        activeContainers: w.resources?.activeContainers ?? 1,
-        maxConcurrentWorkloads: w.limits?.maxConcurrentWorkloads ?? 4,
-        eligible: w.state !== 'offline' && (w.resources?.freeMemoryMb ?? 0) >= memoryMb,
-        rejectionReasons: [],
-      };
-    });
+    const json = await requestJson<WorkerScoreBreakdown[]>(
+      `${API_URL}/api/v1/workers/scores?memoryMb=${memoryMb}`,
+      { headers: this.getAuthHeaders() }
+    );
+    return Array.isArray(json.data) ? json.data : [];
   },
 
   /**
    * Executes a manual worker health check and failure recovery sweep.
    */
   async sweepWorkers(): Promise<SweepResult> {
-    try {
-      const res = await fetch(`${API_URL}/api/v1/workers/sweep`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.data) {
-          return json.data;
-        }
-      }
-    } catch {
-      // fallback
+    const json = await requestJson<SweepResult>(`${API_URL}/api/v1/workers/sweep`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+    if (!json.data) {
+      throw new ApiRequestError('Control plane did not return sweep results', 502, 'INVALID_RESPONSE');
     }
-
-    return {
-      offlineWorkers: [],
-      rescheduledDeployments: [],
-      failedDeployments: [],
-      timestamp: new Date().toISOString(),
-    };
+    return json.data;
   },
 
   /**

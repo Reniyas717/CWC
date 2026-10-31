@@ -16,6 +16,7 @@ import { api } from '@/services/api';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DataError } from '@/components/ui/data-error';
 
 export function LogsPage() {
   const [selectedDeploymentId, setSelectedDeploymentId] = React.useState<string>('all');
@@ -26,7 +27,12 @@ export function LogsPage() {
   const terminalEndRef = React.useRef<HTMLDivElement>(null);
 
   // Fetch all deployments
-  const { data: deployments = [] } = useQuery<Deployment[]>({
+  const {
+    data: deployments = [],
+    isError: isDeploymentsError,
+    error: deploymentsError,
+    refetch: refetchDeployments,
+  } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
     refetchInterval: 5000,
@@ -38,10 +44,15 @@ export function LogsPage() {
       ? deployments[0]
       : deployments.find((d) => d.id === selectedDeploymentId) || deployments[0];
 
+  const isTailPolling =
+    Boolean(activeDep) && (activeDep?.state === 'running' || activeDep?.state === 'building');
+
   const {
     data: logs = [],
     isLoading,
     isFetching,
+    isError: isLogsError,
+    error: logsError,
     refetch,
   } = useQuery<DeploymentLogEntry[]>({
     queryKey: ['deployment-logs', activeDep?.id],
@@ -62,6 +73,16 @@ export function LogsPage() {
       return matchesStream && matchesSearch;
     });
   }, [logs, streamFilter, searchQuery]);
+
+  const tailStatus = isDeploymentsError || isLogsError
+    ? 'Unavailable'
+    : isLoading
+      ? 'Connecting'
+      : isTailPolling
+        ? 'Polling'
+        : activeDep
+          ? 'Idle'
+          : 'No deployment';
 
   // Auto-scroll
   React.useEffect(() => {
@@ -151,6 +172,21 @@ export function LogsPage() {
         </div>
       </div>
 
+      {isDeploymentsError && (
+        <DataError
+          title="Unable to load deployments"
+          error={deploymentsError}
+          onRetry={() => void refetchDeployments()}
+        />
+      )}
+      {isLogsError && (
+        <DataError
+          title="Unable to load deployment logs"
+          error={logsError}
+          onRetry={() => void refetch()}
+        />
+      )}
+
       {/* Main Terminal Shell */}
       <Card className="overflow-hidden border border-border shadow-md flex flex-col h-[74vh]">
         {/* Terminal Header & Workload Selector */}
@@ -195,7 +231,7 @@ export function LogsPage() {
               </span>
               <span>•</span>
               <span>Port :{activeDep.assignedPort || 'ephemeral'}</span>
-              {activeDep.publicUrl && (
+              {activeDep.routingStatus === 'ready' && activeDep.publicUrl && (
                 <>
                   <span>•</span>
                   <a
@@ -329,8 +365,10 @@ export function LogsPage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-            <span>Worker Agent Tail: Connected</span>
+            <CheckCircle2
+              className={`h-3.5 w-3.5 ${tailStatus === 'Unavailable' ? 'text-destructive' : 'text-emerald-500'}`}
+            />
+            <span>Worker Agent Tail: {tailStatus}</span>
           </div>
         </div>
       </Card>

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TailscaleIpv4Schema } from './worker.js';
 
 export const DeploymentStateSchema = z.enum([
   'pending',
@@ -11,6 +12,37 @@ export const DeploymentStateSchema = z.enum([
   'cancelled',
 ]);
 export type DeploymentState = z.infer<typeof DeploymentStateSchema>;
+
+/** Lifecycle of the public ingress route, independent from the worker container. */
+export const RoutingStatusSchema = z.enum(['pending', 'ready', 'failed']);
+export type RoutingStatus = z.infer<typeof RoutingStatusSchema>;
+
+/** Shape returned by the standalone gateway service. */
+export const GatewayPublishedRouteSchema = z.object({
+  deploymentId: z.string().min(1),
+  attemptId: z.string().min(1).optional(),
+  status: z.string().min(1),
+  publicUrl: z
+    .string()
+    .url()
+    .refine((value) => value.startsWith('https://'), 'Gateway URLs must use HTTPS')
+    .optional(),
+  listenerPort: z.number().int().min(1).max(65535).optional(),
+  upstreamIp: TailscaleIpv4Schema,
+  upstreamPort: z.number().int().min(1).max(65535),
+  healthPath: z.string().startsWith('/').optional(),
+});
+export type GatewayPublishedRoute = z.infer<typeof GatewayPublishedRouteSchema>;
+
+export const GatewayPublishedRouteResponseSchema = z.object({
+  success: z.literal(true),
+  data: GatewayPublishedRouteSchema,
+});
+
+export const GatewayReconciliationResponseSchema = z.object({
+  success: z.literal(true),
+  data: z.array(GatewayPublishedRouteSchema),
+});
 
 export const DeploymentLogEntrySchema = z.object({
   id: z.string().uuid().optional(),
@@ -29,9 +61,16 @@ export const DeploymentSchema = z.object({
   gitBranch: z.string().default('main'),
   state: DeploymentStateSchema,
   workerId: z.string().optional(),
+  /** Identity of the worker assignment that produced this state. */
+  attemptId: z.string().min(1).optional(),
   containerId: z.string().optional(),
   assignedPort: z.number().int().optional(),
+  /** Public edge URL. This is never the worker's private address. */
   publicUrl: z.string().url().optional(),
+  /** Private worker endpoint used by the gateway (not exposed as the public URL). */
+  workerUrl: z.string().url().optional(),
+  routingStatus: RoutingStatusSchema.default('pending'),
+  routingError: z.string().optional(),
   errorMessage: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -48,6 +87,8 @@ export type DeploymentStatusResponse = z.infer<typeof DeploymentStatusResponseSc
 
 export const DeploymentTaskPayloadSchema = z.object({
   deploymentId: z.string().min(1),
+  /** Unique assignment identity generated when the control plane claims a task. */
+  attemptId: z.string().min(1).optional(),
   applicationId: z.string().min(1),
   git: z.object({
     repositoryUrl: z.string().url(),
@@ -90,10 +131,14 @@ export type DeploymentTaskResponse = z.infer<typeof DeploymentTaskResponseSchema
 export const DeploymentResultPayloadSchema = z.object({
   deploymentId: z.string().min(1),
   workerId: z.string().min(1),
+  /** Must match the current assignment, otherwise the result is stale. */
+  attemptId: z.string().min(1).optional(),
   state: z.enum(['running', 'failed', 'stopped']),
   containerId: z.string().optional(),
   assignedPort: z.number().int().optional(),
+  /** Legacy worker field; treated as a private URL by the control plane. */
   publicUrl: z.string().optional(),
+  workerUrl: z.string().optional(),
   gitCommitHash: z.string().optional(),
   imageTag: z.string().optional(),
   errorMessage: z.string().nullable().optional(),

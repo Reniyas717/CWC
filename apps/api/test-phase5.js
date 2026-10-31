@@ -69,6 +69,7 @@ async function runPhase5Tests() {
         id: healthyWorkerId,
         name: 'Healthy Worker',
         hostname: 'healthy-host',
+        ipAddress: '100.100.0.3',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -115,6 +116,7 @@ async function runPhase5Tests() {
         id: deadWorkerId,
         name: 'Dead Worker 1',
         hostname: 'dead-host',
+        ipAddress: '100.100.0.4',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -166,6 +168,7 @@ async function runPhase5Tests() {
         id: workerWithTask,
         name: 'Worker With Task',
         hostname: 'failover-host',
+        ipAddress: '100.100.0.5',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -196,8 +199,34 @@ async function runPhase5Tests() {
     const createDepJson = await createDepRes.json();
     const depId = createDepJson.data.id;
 
+    // Rejected active deletes must not call the gateway first. The 400 is
+    // deterministic even when the gateway is unavailable, protecting a live
+    // route from an accidental delete attempt.
+    const activeDeleteRes = await fetch(`${base}/api/v1/deployments/${depId}`, {
+      method: 'DELETE',
+      headers: adminHeaders,
+    });
+    const activeDeleteJson = await activeDeleteRes.json();
+    assert(
+      activeDeleteRes.status === 400 && activeDeleteJson.error?.code === 'ACTIVE_DEPLOYMENT',
+      'active deployment delete is rejected before gateway cleanup'
+    );
+
     // Worker polls task -> transitions to 'building'
     await fetch(`${base}/api/v1/workers/${workerWithTask}/tasks`, { headers: workerHeaders });
+
+    // The deployment may also be in the image-to-container transition; that
+    // state must be protected by the same delete guard.
+    await pool.query("UPDATE deployments SET state = 'deploying' WHERE id = $1", [depId]);
+    const deployingDeleteRes = await fetch(`${base}/api/v1/deployments/${depId}`, {
+      method: 'DELETE',
+      headers: adminHeaders,
+    });
+    const deployingDeleteJson = await deployingDeleteRes.json();
+    assert(
+      deployingDeleteRes.status === 400 && deployingDeleteJson.error?.code === 'ACTIVE_DEPLOYMENT',
+      'deploying deployment delete is rejected before gateway cleanup'
+    );
 
     // Worker reports running result
     await fetch(`${base}/api/v1/internal/deployments/${depId}/result`, {
@@ -274,6 +303,7 @@ async function runPhase5Tests() {
         id: rescueWorkerId,
         name: 'Rescue Worker',
         hostname: 'rescue-host',
+        ipAddress: '100.100.0.6',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -324,6 +354,7 @@ async function runPhase5Tests() {
         id: maxRetryWorker,
         name: 'Max Retry Worker',
         hostname: 'maxretry-host',
+        ipAddress: '100.100.0.7',
         port: 5001,
         authToken: workerToken,
         resources: {

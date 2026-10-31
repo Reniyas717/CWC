@@ -22,11 +22,25 @@ export const WorkerLimitsSchema = z.object({
 });
 export type WorkerLimits = z.infer<typeof WorkerLimitsSchema>;
 
+/**
+ * Tailscale assigns IPv4 addresses from the CGNAT 100.64.0.0/10 range.
+ * Keep this contract narrow so a transport peer address or public interface
+ * cannot accidentally become a gateway upstream.
+ */
+export const TailscaleIpv4Schema = z
+  .string()
+  .ip({ version: 'v4' })
+  .refine((address) => {
+    const octets = address.split('.').map(Number);
+    return octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  }, 'Address must be a Tailscale IPv4 address in 100.64.0.0/10');
+export type TailscaleIpv4 = z.infer<typeof TailscaleIpv4Schema>;
+
 export const WorkerNodeSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   hostname: z.string(),
-  ipAddress: z.string(),
+  ipAddress: TailscaleIpv4Schema,
   port: z.number().int(),
   state: WorkerStateSchema,
   resources: WorkerResourcesSchema,
@@ -41,7 +55,7 @@ export const WorkerRegistrationSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   hostname: z.string(),
-  ipAddress: z.string().optional(),
+  ipAddress: TailscaleIpv4Schema,
   port: z.number().int().positive(),
   authToken: z.string().min(8),
   resources: WorkerResourcesSchema,
