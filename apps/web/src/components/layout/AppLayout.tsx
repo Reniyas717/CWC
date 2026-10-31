@@ -154,36 +154,19 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground font-sans selection:bg-primary/10">
-      {/* Top Navbar: Minimal, Quiet, High-Precision */}
+      {/* Top Navbar: Clean & Free of Internal Sidebar Buttons */}
       <header className="sticky top-0 z-30 h-13 border-b border-sidebar-border bg-sidebar/95 backdrop-blur-xs flex items-center justify-between px-3 sm:px-5">
-        {/* Left Side: Collapse Toggle, Brand & Current Section */}
+        {/* Left Side: Brand & Current Section */}
         <div className="flex items-center gap-2.5">
-          {/* Desktop Collapse Toggle */}
-          <button
-            type="button"
-            onClick={toggleSidebar}
-            className="hidden md:flex h-8 w-8 rounded-md items-center justify-center text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors focus:outline-none cursor-pointer"
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label="Toggle sidebar"
-          >
-            {isCollapsed ? (
-              <PanelLeft className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </button>
-
-          {/* Mobile Drawer Toggle */}
+          {/* Mobile Drawer Toggle (Only on small screens) */}
           <button
             type="button"
             onClick={() => setIsMobileOpen(!isMobileOpen)}
-            className="md:hidden h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-sidebar-accent focus:outline-none"
+            className="md:hidden h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-sidebar-accent focus:outline-none cursor-pointer"
             aria-label="Open navigation menu"
           >
             {isMobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
-
-          <div className="h-4 w-px bg-sidebar-border hidden md:block"></div>
 
           {/* Brand Identity */}
           <NavLink to="/" className="flex items-center gap-2 group">
@@ -222,7 +205,7 @@ export function AppLayout() {
             href="https://github.com/BnB-26-Final-Round/Team-Pony_Final-Round"
             target="_blank"
             rel="noreferrer"
-            className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors"
+            className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer"
             title="GitHub Repository"
           >
             <ExternalLink className="h-3.5 w-3.5" />
@@ -281,11 +264,33 @@ export function AppLayout() {
             ))}
           </div>
 
-          {/* Sidebar Footer — minimal, just version tag */}
-          <div className="p-3 border-t border-sidebar-border">
-            <div className="text-[10px] font-mono text-muted-foreground/50 text-center tracking-wide">
-              cwc v0.1.0
-            </div>
+          {/* Sidebar Footer — Internal Collapse Button & Version Tag */}
+          <div className="p-2 border-t border-sidebar-border">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className={`flex items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors cursor-pointer w-full ${
+                isCollapsed
+                  ? 'h-9 w-9 mx-auto justify-center'
+                  : 'h-8 px-2.5 gap-2.5 text-xs font-medium justify-between'
+              }`}
+              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label="Toggle sidebar"
+            >
+              {isCollapsed ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <PanelLeftClose className="h-4 w-4 shrink-0" />
+                    <span>Collapse sidebar</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-muted-foreground/60 tracking-wider">
+                    v0.1.0
+                  </span>
+                </>
+              )}
+            </button>
           </div>
         </aside>
 
@@ -315,7 +320,7 @@ export function AppLayout() {
             <button
               type="button"
               onClick={() => setIsMobileOpen(false)}
-              className="p-1 rounded text-muted-foreground hover:text-foreground"
+              className="p-1 rounded text-muted-foreground hover:text-foreground cursor-pointer"
             >
               <X className="h-5 w-5" />
             </button>

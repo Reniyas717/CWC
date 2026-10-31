@@ -5,12 +5,10 @@ import {
   X,
   Server,
   HardDrive,
-  Cpu,
   CheckCircle2,
   AlertCircle,
-  HelpCircle,
-  ShieldCheck,
-  Zap,
+  Laptop,
+  Check,
 } from 'lucide-react';
 import { Deployment, WorkerNode } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
@@ -35,16 +33,15 @@ export function RelocateWorkloadModal({
   const [selectedTargetId, setSelectedTargetId] = React.useState<string>('');
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
-  // Default memory cap if not provided
   const workloadMemoryMb = 512;
 
-  // Identify source worker
+  // Source worker where the app is currently running
   const sourceWorker = React.useMemo(() => {
     if (!deployment?.workerId) return null;
     return workers.find((w) => w.id === deployment.workerId) || null;
   }, [deployment, workers]);
 
-  // Compute eligible target workers and auto-select best candidate
+  // Candidate destination devices
   const candidateWorkers = React.useMemo(() => {
     return workers.map((w) => {
       const isCurrent = w.id === deployment?.workerId;
@@ -57,38 +54,38 @@ export function RelocateWorkloadModal({
 
       const totalMem = Math.max(w.resources?.totalMemoryMb ?? 8192, 1);
       const usedMem = Math.max(w.resources?.usedMemoryMb ?? 0, 0);
-      const currentRatio = (usedMem / totalMem) * 100;
-      const projectedRatio = ((usedMem + workloadMemoryMb) / totalMem) * 100;
+      const currentLoadPct = Math.round((usedMem / totalMem) * 100);
+      const projectedLoadPct = Math.round(((usedMem + workloadMemoryMb) / totalMem) * 100);
 
-      let rejectionReason: string | null = null;
-      if (isCurrent) rejectionReason = 'Current host node';
-      else if (!isOnline) rejectionReason = 'Host is currently offline';
-      else if (!hasMemory) rejectionReason = `Insufficient free memory (${freeMem} MB free)`;
-      else if (!hasSlot) rejectionReason = `Container concurrency limit reached (${maxCount}/${maxCount})`;
+      let reason = '';
+      if (isCurrent) reason = 'Already running here';
+      else if (!isOnline) reason = 'Device is offline';
+      else if (!hasMemory) reason = `Not enough free RAM (${(freeMem / 1024).toFixed(1)} GB free)`;
+      else if (!hasSlot) reason = `Device is full (${maxCount}/${maxCount} apps)`;
 
       return {
         worker: w,
         isCurrent,
         isOnline,
         eligible: !isCurrent && isOnline && hasMemory && hasSlot,
-        rejectionReason,
-        currentRatio,
-        projectedRatio,
-        freeMem,
-        totalMem,
+        reason,
+        currentLoadPct,
+        projectedLoadPct,
+        freeMemGb: (freeMem / 1024).toFixed(1),
+        totalMemGb: (totalMem / 1024).toFixed(0),
         activeCount,
         maxCount,
       };
     });
   }, [workers, deployment, workloadMemoryMb]);
 
-  // Auto-pick lowest allocation eligible worker if none selected
+  // Pre-select best eligible candidate
   React.useEffect(() => {
     if (isOpen && deployment) {
       setErrorMessage(null);
       const eligibleOnes = candidateWorkers
         .filter((c) => c.eligible)
-        .sort((a, b) => a.currentRatio - b.currentRatio);
+        .sort((a, b) => a.currentLoadPct - b.currentLoadPct);
       if (eligibleOnes.length > 0) {
         setSelectedTargetId(eligibleOnes[0].worker.id);
       } else {
@@ -108,20 +105,12 @@ export function RelocateWorkloadModal({
       onClose();
     },
     onError: (err: unknown) => {
-      const msg = err instanceof Error ? err.message : 'Relocation failed. Please try again.';
+      const msg = err instanceof Error ? err.message : 'Could not move app. Please try again.';
       setErrorMessage(msg);
     },
   });
 
   if (!isOpen || !deployment) return null;
-
-  const selectedCandidate = candidateWorkers.find((c) => c.worker.id === selectedTargetId);
-
-  // Source host projected reduction
-  const sourceTotalMem = Math.max(sourceWorker?.resources?.totalMemoryMb ?? 8192, 1);
-  const sourceUsedMem = Math.max(sourceWorker?.resources?.usedMemoryMb ?? 0, 0);
-  const sourceCurrentRatio = (sourceUsedMem / sourceTotalMem) * 100;
-  const sourceProjectedRatio = (Math.max(0, sourceUsedMem - workloadMemoryMb) / sourceTotalMem) * 100;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,92 +119,76 @@ export function RelocateWorkloadModal({
     relocateMutation.mutate({ depId: deployment.id, targetId: selectedTargetId });
   };
 
+  const selectedCandidate = candidateWorkers.find((c) => c.worker.id === selectedTargetId);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-background/80 backdrop-blur-xs no-scrollbar overflow-y-auto">
-      <div className="relative w-full max-w-2xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden text-foreground animate-in fade-in-50 zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-xs no-scrollbar overflow-y-auto">
+      <div className="relative w-full max-w-xl bg-card border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden text-foreground animate-in fade-in-50 zoom-in-95 duration-150">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-secondary flex items-center justify-center text-foreground shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-secondary/20">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-primary text-primary-foreground flex items-center justify-center shrink-0 shadow-xs">
               <ArrowLeftRight className="h-4 w-4" />
             </div>
             <div>
               <h2
-                className="text-sm font-bold text-foreground"
+                className="text-base font-bold text-foreground"
                 style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
               >
-                Relocate Workload Container
+                Move App to Another Device
               </h2>
-              <p className="text-[11px] text-muted-foreground font-mono truncate">
-                {deployment.id} • {deployment.applicationId}
+              <p className="text-xs text-muted-foreground">
+                Relocate this app workload to balance device resources.
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+            className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Modal Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 no-scrollbar">
+        {/* Form Body */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {errorMessage && (
-            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
+            <div className="p-3.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2.5">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          {/* Current Allocation Card */}
-          <div className="p-3.5 rounded-xl border border-border bg-secondary/20 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-semibold text-foreground flex items-center gap-1.5">
-                <Server className="h-3.5 w-3.5 text-muted-foreground" />
-                Current Placement
+          {/* Current App Info Banner */}
+          <div className="p-3.5 rounded-xl bg-secondary/30 border border-border flex items-center justify-between gap-3 text-xs">
+            <div className="min-w-0">
+              <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground block font-mono">
+                Selected Workload
               </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
-                Port {deployment.assignedPort || 'Dynamic'}
-              </span>
+              <p className="font-bold text-foreground text-sm truncate mt-0.5 font-mono">
+                {deployment.applicationId}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Uses <strong>512 MB RAM</strong> • Currently hosted on{' '}
+                <span className="text-foreground font-medium">
+                  {sourceWorker?.name || 'Unassigned'}
+                </span>
+              </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1 text-xs">
-              <div className="p-2 rounded-lg bg-background border border-border">
-                <p className="text-[10px] text-muted-foreground">Host Node</p>
-                <p className="font-medium text-foreground truncate mt-0.5">
-                  {sourceWorker?.name || deployment.workerId || 'Unassigned'}
-                </p>
-              </div>
-              <div className="p-2 rounded-lg bg-background border border-border">
-                <p className="text-[10px] text-muted-foreground">Workload RAM Cap</p>
-                <p className="font-mono font-medium text-foreground mt-0.5">
-                  {workloadMemoryMb} MB (Hard limit)
-                </p>
-              </div>
-              <div className="p-2 rounded-lg bg-background border border-border">
-                <p className="text-[10px] text-muted-foreground">Current Host Utilization</p>
-                <p className="font-mono font-medium text-foreground mt-0.5">
-                  {sourceCurrentRatio.toFixed(1)}% of {(sourceTotalMem / 1024).toFixed(0)} GB
-                </p>
-              </div>
-            </div>
+            <span className="text-xs font-mono px-2 py-1 rounded-md bg-secondary border border-border text-foreground shrink-0">
+              Port {deployment.assignedPort || '3000'}
+            </span>
           </div>
 
-          {/* Target Host Selector */}
+          {/* Target Devices Selection */}
           <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
-                Select Destination Worker Node
-              </label>
-              <span className="text-[10px] text-muted-foreground">
-                Evaluated proportionally by available capacity
-              </span>
-            </div>
+            <label className="text-xs font-semibold text-foreground block">
+              Choose Destination Device:
+            </label>
 
-            <div className="grid grid-cols-1 gap-2">
+            <div className="space-y-2">
               {candidateWorkers.map((cand) => {
                 const isSelected = selectedTargetId === cand.worker.id;
                 const isEligible = cand.eligible;
@@ -226,141 +199,89 @@ export function RelocateWorkloadModal({
                     onClick={() => {
                       if (isEligible) setSelectedTargetId(cand.worker.id);
                     }}
-                    className={`p-3 rounded-xl border transition-all text-xs ${
+                    className={`p-3.5 rounded-xl border transition-all text-xs flex items-center justify-between gap-3 ${
                       isSelected
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                         : isEligible
                         ? 'border-border bg-card hover:bg-secondary/40 cursor-pointer'
-                        : 'border-border/60 bg-secondary/15 opacity-60 cursor-not-allowed'
+                        : 'border-border/40 bg-secondary/15 opacity-60 cursor-not-allowed'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <div
-                          className={`h-4 w-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${
-                            isSelected
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-muted-foreground/40'
-                          }`}
-                        >
-                          {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-background" />}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-foreground truncate">
-                              {cand.worker.name}
-                            </span>
-                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
-                              {cand.worker.ipAddress}
-                            </span>
-                            {cand.currentRatio < 30 && isEligible && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                                Recommended (Headroom)
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
-                            Hardware Spec:{' '}
-                            <span className="font-mono text-foreground">
-                              {(cand.totalMem / 1024).toFixed(0)} GB RAM
-                            </span>{' '}
-                            • {cand.worker.resources?.cpuCount ?? 4} Cores • Free:{' '}
-                            <span className="font-mono text-foreground">{cand.freeMem} MB</span>
-                          </p>
-                        </div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`h-5 w-5 rounded-full border flex items-center justify-center shrink-0 ${
+                          isSelected
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-muted-foreground/40'
+                        }`}
+                      >
+                        {isSelected && <Check className="h-3 w-3 stroke-[3]" />}
                       </div>
 
-                      {/* Right Side Badge / Rejection Reason */}
-                      <div className="text-right shrink-0">
-                        {!isEligible ? (
-                          <span className="inline-block text-[10px] text-muted-foreground/80 font-mono px-2 py-0.5 rounded bg-secondary/80 border border-border">
-                            {cand.rejectionReason}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold text-foreground text-sm truncate">
+                            {cand.worker.name}
                           </span>
-                        ) : (
-                          <div className="text-right font-mono">
-                            <span className="text-[11px] text-foreground font-semibold">
-                              {cand.currentRatio.toFixed(1)}% → {cand.projectedRatio.toFixed(1)}%
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                            {cand.totalMemGb} GB RAM
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {cand.freeMemGb} GB free • Load: {cand.currentLoadPct}%{' '}
+                          {isEligible && (
+                            <span className="text-foreground font-medium">
+                              → {cand.projectedLoadPct}% after move
                             </span>
-                            <p className="text-[10px] text-muted-foreground">Allocation Ratio</p>
-                          </div>
-                        )}
+                          )}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Progress Bar Showing Capacity Impact */}
-                    {isEligible && (
-                      <div className="mt-2.5 pt-2 border-t border-border/40 grid grid-cols-2 gap-3 text-[10px]">
-                        <div>
-                          <div className="flex justify-between text-muted-foreground mb-1">
-                            <span>Projected Node Allocation:</span>
-                            <span className="font-mono font-medium text-foreground">
-                              {cand.projectedRatio.toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-primary rounded-full transition-all"
-                              style={{ width: `${Math.min(cand.projectedRatio, 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex justify-between text-muted-foreground mb-1">
-                            <span>Containers:</span>
-                            <span className="font-mono text-foreground">
-                              {cand.activeCount + 1} / {cand.maxCount} Max
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-muted-foreground rounded-full transition-all"
-                              style={{
-                                width: `${Math.min(((cand.activeCount + 1) / cand.maxCount) * 100, 100)}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className="text-right shrink-0">
+                      {!isEligible ? (
+                        <span className="text-[10px] text-muted-foreground/80 px-2 py-0.5 rounded bg-secondary/60 border border-border">
+                          {cand.reason}
+                        </span>
+                      ) : cand.currentLoadPct < 30 ? (
+                        <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                          Recommended
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Mathematical Proportional Fairness Notice */}
-          <div className="p-3 rounded-lg bg-secondary/30 border border-border text-[11px] text-muted-foreground space-y-1">
-            <div className="flex items-center gap-1.5 text-foreground font-semibold">
-              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-              <span>Proportional Cluster Capacity Weighting</span>
-            </div>
-            <p>
-              Allocations are weighted against the physical hardware capacity of each node. A 512 MB
-              allocation consumes <strong>3.1%</strong> of a 16 GB machine, but <strong>25.0%</strong> of a 2 GB
-              machine. Relocating to higher-spec nodes prevents thin laptops from running out of headroom.
-            </p>
+          {/* Simple Explanation Note */}
+          <div className="p-3 rounded-xl bg-secondary/20 border border-border text-[11px] text-muted-foreground leading-relaxed">
+            💡 <strong>How it works:</strong> The platform will pull this container on the selected
+            device, verify that it passes health checks, and dynamically route incoming traffic to
+            its new port without downtime.
           </div>
 
-          {/* Modal Footer Actions */}
-          <div className="pt-2 flex items-center justify-between border-t border-border">
-            <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs">
+          {/* Modal Actions */}
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs cursor-pointer">
               Cancel
             </Button>
             <Button
               type="submit"
               size="sm"
               disabled={!selectedTargetId || relocateMutation.isPending}
-              className="text-xs font-semibold flex items-center gap-1.5"
+              className="text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
               {relocateMutation.isPending ? (
                 <>
                   <span className="h-3 w-3 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                  Relocating Workload...
+                  Moving App...
                 </>
               ) : (
                 <>
                   <ArrowLeftRight className="h-3.5 w-3.5" />
-                  <span>Confirm Relocation</span>
+                  <span>Confirm & Move App</span>
                 </>
               )}
             </Button>
