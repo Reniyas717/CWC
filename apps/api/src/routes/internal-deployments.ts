@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import {
   DeploymentResultPayloadSchema,
   DeploymentLogsPayloadSchema,
+  TailscaleIpv4Schema,
 } from '@cloud-without-clouds/shared';
 import { requireWorker } from '../middlewares/auth.js';
 import { db } from '../db/index.js';
@@ -148,20 +149,24 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
       const targetWorkerId = payload.workerId || currentDep.workerId;
       void (async () => {
         try {
-          let upstreamIp = '127.0.0.1';
-          if (targetWorkerId) {
-            const workerRow = await db
-              .select()
-              .from(workerNodes)
-              .where(eq(workerNodes.id, targetWorkerId));
-            if (workerRow.length > 0 && workerRow[0].ipAddress) {
-              upstreamIp = workerRow[0].ipAddress;
-            }
+          if (!targetWorkerId) {
+            throw new Error('Cannot publish gateway route without an assigned worker');
+          }
+
+          const workerRow = await db
+            .select()
+            .from(workerNodes)
+            .where(eq(workerNodes.id, targetWorkerId));
+          const upstreamIp = workerRow[0]
+            ? TailscaleIpv4Schema.safeParse(workerRow[0].ipAddress)
+            : { success: false as const };
+          if (!upstreamIp.success) {
+            throw new Error(`Worker ${targetWorkerId} has no valid Tailscale upstream address`);
           }
 
           const published = await gatewayClient.publishRoute(
             id,
-            upstreamIp,
+            upstreamIp.data,
             payload.assignedPort!,
             '/'
           );

@@ -12,6 +12,7 @@ const sampleWorkerRegistration = {
   id: 'worker-auth-test-01',
   name: 'Auth Test Worker',
   hostname: 'auth-host',
+  ipAddress: '100.100.0.1',
   port: 5001,
   authToken: workerToken,
   resources: {

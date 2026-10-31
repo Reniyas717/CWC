@@ -37,6 +37,7 @@ The worker loads environment variables from the root `.env` or local `.env` via 
 | `WORKER_ID` | `string` | `worker-node-local-01` | Unique identifier for this worker node |
 | `WORKER_NAME` | `string` | `Local Development Worker` | Human-readable node display name |
 | `WORKER_PORT` | `number` | `5001` | Local port metadata reported during registration |
+| `TAILSCALE_IP` | `IPv4` | *(auto-discovered)* | Optional Tailscale address override; must be in `100.64.0.0/10` |
 | `CONTROL_PLANE_URL` | `string (URL)` | `http://localhost:4000` | Base URL of the Express Control Plane API |
 | `WORKER_SECRET_TOKEN` | `string (min 8)` | `dev-worker-secret-token-change-in-production` | Bearer token used for worker API authentication |
 | `MAX_CONCURRENT_WORKLOADS` | `number` | `4` | Maximum parallel containers this worker will host |

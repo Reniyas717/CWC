@@ -69,6 +69,7 @@ async function runPhase5Tests() {
         id: healthyWorkerId,
         name: 'Healthy Worker',
         hostname: 'healthy-host',
+        ipAddress: '100.100.0.3',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -115,6 +116,7 @@ async function runPhase5Tests() {
         id: deadWorkerId,
         name: 'Dead Worker 1',
         hostname: 'dead-host',
+        ipAddress: '100.100.0.4',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -166,6 +168,7 @@ async function runPhase5Tests() {
         id: workerWithTask,
         name: 'Worker With Task',
         hostname: 'failover-host',
+        ipAddress: '100.100.0.5',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -274,6 +277,7 @@ async function runPhase5Tests() {
         id: rescueWorkerId,
         name: 'Rescue Worker',
         hostname: 'rescue-host',
+        ipAddress: '100.100.0.6',
         port: 5001,
         authToken: workerToken,
         resources: {
@@ -324,6 +328,7 @@ async function runPhase5Tests() {
         id: maxRetryWorker,
         name: 'Max Retry Worker',
         hostname: 'maxretry-host',
+        ipAddress: '100.100.0.7',
         port: 5001,
         authToken: workerToken,
         resources: {
