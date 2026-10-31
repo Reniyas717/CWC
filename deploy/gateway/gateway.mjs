@@ -22,6 +22,9 @@ export class ReconciliationError extends GatewayError {
 }
 
 export function validateRouteInput(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new GatewayError(400, 'INVALID_ROUTE', 'route input must be an object');
+  }
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(input.deploymentId)) {
     throw new GatewayError(400, 'INVALID_DEPLOYMENT_ID', 'deploymentId must be a safe route identifier');
   }
@@ -40,7 +43,7 @@ export function validateRouteInput(input) {
 
 export function isTailscaleIpv4(value) {
   const parts = String(value).split('.');
-  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) return false;
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part) || Number(part) > 255)) return false;
   const number = parts.reduce((result, part) => result * 256 + Number(part), 0);
   return number >= 0x64400000 && number <= 0x647fffff;
 }
@@ -76,11 +79,18 @@ export class CaddyAdminClient {
     const previous = this.routes.get(route.deploymentId);
     this.routes.set(route.deploymentId, route);
     const config = this.#config();
-    const result = await this.fetch(`${this.baseUrl}/load`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(config),
-    });
+    let result;
+    try {
+      result = await this.fetch(`${this.baseUrl}/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+    } catch (error) {
+      if (previous) this.routes.set(route.deploymentId, previous);
+      else this.routes.delete(route.deploymentId);
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy update failed: ${error.message}`);
+    }
     if (!result.ok) {
       if (previous) this.routes.set(route.deploymentId, previous);
       else this.routes.delete(route.deploymentId);
@@ -91,11 +101,17 @@ export class CaddyAdminClient {
   async remove(deploymentId) {
     const previous = this.routes.get(deploymentId);
     this.routes.delete(deploymentId);
-    const result = await this.fetch(`${this.baseUrl}/load`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(this.#config()),
-    });
+    let result;
+    try {
+      result = await this.fetch(`${this.baseUrl}/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(this.#config()),
+      });
+    } catch (error) {
+      if (previous) this.routes.set(deploymentId, previous);
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy route removal failed: ${error.message}`);
+    }
     if (!result.ok) {
       if (previous) this.routes.set(deploymentId, previous);
       throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected the route removal (${result.status})`);
@@ -105,11 +121,17 @@ export class CaddyAdminClient {
   async clear() {
     const previous = this.routes;
     this.routes = new Map();
-    const result = await this.fetch(`${this.baseUrl}/load`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(this.#config()),
-    });
+    let result;
+    try {
+      result = await this.fetch(`${this.baseUrl}/load`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(this.#config()),
+      });
+    } catch (error) {
+      this.routes = previous;
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy route reset failed: ${error.message}`);
+    }
     if (!result.ok) {
       this.routes = previous;
       throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected route reset (${result.status})`);
@@ -126,9 +148,13 @@ export class CaddyAdminClient {
           handle: [{
             handler: 'reverse_proxy',
             upstreams: [{ dial: `${route.upstreamIp}:${route.upstreamPort}` }],
-            health_uri: route.healthPath,
-            health_interval: '5s',
-            health_timeout: '2s',
+            health_checks: {
+              active: {
+                uri: route.healthPath,
+                interval: '5s',
+                timeout: '2s',
+              },
+            },
           }],
           terminal: true,
         }],
@@ -144,35 +170,50 @@ export class QuickTunnel {
   }
 
   async start(listenerPort, { onExit } = {}) {
-    const child = this.spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stopped = false;
-    child.once('exit', () => {
-      if (!stopped) onExit?.();
-    });
-    const output = async function* () {
-      for await (const chunk of child.stderr) yield chunk.toString();
-      for await (const chunk of child.stdout) yield chunk.toString();
-    }();
-    let buffer = '';
-    const deadline = Date.now() + 15000;
-    while (Date.now() < deadline) {
-      const next = await Promise.race([
-        output.next(),
-        once(child, 'exit').then(() => ({ done: true, value: '' })),
-      ]);
-      if (next.done) break;
-      buffer += next.value;
-      const match = buffer.match(/https:\/\/(?!api\.)[-a-z0-9]+\.trycloudflare\.com/i);
-      if (match) return {
-        url: match[0],
-        stop: () => {
-          stopped = true;
-          child.kill('SIGTERM');
-        },
-      };
+    let child;
+    try {
+      child = this.spawn('cloudflared', ['tunnel', '--url', `http://127.0.0.1:${listenerPort}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (error) {
+      throw new GatewayError(502, 'TUNNEL_START_FAILED', `unable to start cloudflared: ${error.message}`);
     }
-    child.kill('SIGTERM');
-    throw new GatewayError(502, 'TUNNEL_START_FAILED', 'cloudflared did not provide a public URL');
+    let stopped = false;
+    return new Promise((resolve, reject) => {
+      let buffer = '';
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        callback(value);
+      };
+      const onData = (chunk) => {
+        buffer += chunk.toString();
+        const match = buffer.match(/https:\/\/(?!api\.)[-a-z0-9]+\.trycloudflare\.com/i);
+        if (match) finish(resolve, {
+          url: match[0],
+          stop: () => {
+            stopped = true;
+            child.kill('SIGTERM');
+          },
+        });
+      };
+      const onError = (error) => finish(reject, new GatewayError(502, 'TUNNEL_START_FAILED', `cloudflared failed: ${error.message}`));
+      const handleExit = (code) => {
+        if (!stopped) {
+          onExit?.();
+          if (!settled) finish(reject, new GatewayError(502, 'TUNNEL_START_FAILED', `cloudflared exited before publishing a URL (${code ?? 'unknown'})`));
+        }
+      };
+      const timeout = setTimeout(() => {
+        stopped = true;
+        child.kill('SIGTERM');
+        finish(reject, new GatewayError(502, 'TUNNEL_START_FAILED', 'cloudflared did not provide a public URL within 15 seconds'));
+      }, 15000);
+      child.stdout?.on('data', onData);
+      child.stderr?.on('data', onData);
+      child.once('error', onError);
+      child.once('exit', handleExit);
+    });
   }
 }
 
@@ -184,9 +225,20 @@ export class RouteManager {
     this.listenerBase = listenerBase;
     this.routes = new Map();
     this.nextListenerOffset = 0;
+    this.mutation = Promise.resolve();
   }
 
   async publish(input) {
+    return this.#enqueue(() => this.#publish(input));
+  }
+
+  #enqueue(operation) {
+    const result = this.mutation.then(operation, operation);
+    this.mutation = result.catch(() => {});
+    return result;
+  }
+
+  async #publish(input) {
     const route = validateRouteInput(input);
     const target = `http://${route.upstreamIp}:${route.upstreamPort}${route.healthPath}`;
     let health;
@@ -217,6 +269,10 @@ export class RouteManager {
   }
 
   async restartTunnel(deploymentId) {
+    return this.#enqueue(() => this.#restartTunnel(deploymentId));
+  }
+
+  async #restartTunnel(deploymentId) {
     const record = this.routes.get(deploymentId);
     if (!record) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
     record.status = 'restarting';
@@ -229,6 +285,10 @@ export class RouteManager {
   }
 
   async remove(deploymentId, { ignoreMissing = false } = {}) {
+    return this.#enqueue(() => this.#remove(deploymentId, { ignoreMissing }));
+  }
+
+  async #remove(deploymentId, { ignoreMissing = false } = {}) {
     const record = this.routes.get(deploymentId);
     if (!record) {
       if (!ignoreMissing) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
@@ -245,6 +305,10 @@ export class RouteManager {
    * never become publicly reachable after a restart.
    */
   async reconcile(stateProvider) {
+    return this.#enqueue(() => this.#reconcile(stateProvider));
+  }
+
+  async #reconcile(stateProvider) {
     if (typeof stateProvider !== 'function') {
       throw new ReconciliationError('an authoritative state provider is required');
     }
@@ -270,9 +334,9 @@ export class RouteManager {
     await this.#clearRoutes();
     const restored = [];
     try {
-      for (const route of desired) restored.push(await this.publish(route));
+      for (const route of desired) restored.push(await this.#publish(route));
     } catch (error) {
-      for (const deploymentId of [...this.routes.keys()]) await this.remove(deploymentId, { ignoreMissing: true }).catch(() => {});
+      for (const deploymentId of [...this.routes.keys()]) await this.#remove(deploymentId, { ignoreMissing: true }).catch(() => {});
       throw error;
     }
     return restored;
@@ -354,5 +418,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const server = createGatewayServer();
   const port = Number(process.env.GATEWAY_PORT ?? 4100);
   const host = process.env.GATEWAY_BIND_HOST ?? '127.0.0.1';
+  if (host !== '127.0.0.1' && !isTailscaleIpv4(host)) {
+    throw new Error('GATEWAY_BIND_HOST must be 127.0.0.1 or a Tailscale IPv4 address');
+  }
   server.listen(port, host, () => console.log(`Gateway service listening on ${host}:${port}`));
 }

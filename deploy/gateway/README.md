@@ -42,6 +42,9 @@ authoritative current deployment records. The gateway does not restore a local
 snapshot. If reconciliation fails, it clears in-memory routes and returns
 `RECONCILIATION_UNAVAILABLE`, leaving stale routes unpublished. Successful
 records are health-checked before routes and tunnels are restored.
+The reconciliation body is trusted only after the gateway token authenticates
+the control plane; do not expose this endpoint to untrusted clients or accept
+worker-originated reconciliation data directly.
 
 For a systemd installation, copy `gateway.service.example` to
 `/etc/systemd/system/cloud-without-clouds-gateway.service`, create the
