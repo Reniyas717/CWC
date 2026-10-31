@@ -5,10 +5,11 @@ exec {RESULT_FD}>&1
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: build-and-publish.sh <public-https-git-url> <branch> <dockerhub-repository>
+Usage: build-and-publish.sh <public-https-git-url> <branch> <dockerhub-repository> [build-context] [dockerfile]
 
-Builds the branch tip using ./Dockerfile at the repository root and pushes
-<dockerhub-repository>:<commit-sha>. Authenticate with `docker login` first.
+Builds the branch tip and pushes <dockerhub-repository>:<commit-sha>.
+Paths are relative to the repository root and default to . and Dockerfile.
+Authenticate with `docker login` first.
 The image tag identifies the source commit; a returned digest identifies the
 specific image content published for that tag.
 USAGE
@@ -95,15 +96,17 @@ if [[ ${1:-} == "--help" || ${1:-} == "-h" ]]; then
   exit 0
 fi
 
-if [[ $# -ne 3 ]]; then
+if [[ $# -lt 3 || $# -gt 5 ]]; then
   usage
-  emit_result failure arguments "expected a Git URL, branch, and Docker Hub repository"
+  emit_result failure arguments "expected a Git URL, branch, Docker Hub repository, and optional build paths"
   exit 2
 fi
 
 REPOSITORY_URL=$1
 BRANCH=$2
 DOCKERHUB_REPOSITORY=$3
+BUILD_CONTEXT=${4:-.}
+DOCKERFILE=${5:-Dockerfile}
 
 if [[ ! $REPOSITORY_URL =~ ^https://[^/]+/.+ ]]; then
   emit_result failure validation "repository URL must be a public HTTPS Git URL"
@@ -115,6 +118,10 @@ if [[ -z $BRANCH || $BRANCH == -* ]]; then
 fi
 if [[ ! $DOCKERHUB_REPOSITORY =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
   emit_result failure validation "Docker Hub repository must have the form owner/name"
+  exit 2
+fi
+if [[ $BUILD_CONTEXT == /* || $DOCKERFILE == /* ]]; then
+  emit_result failure validation "build paths must be relative to the repository root"
   exit 2
 fi
 
@@ -144,9 +151,31 @@ if [[ ! $COMMIT_SHA =~ ^[0-9a-f]{40}$ ]]; then
   fail checkout "git returned an invalid commit SHA"
 fi
 
+resolve_repo_path() {
+  local relative_path=$1 resolved_path
+  if ! resolved_path=$(realpath -e -- "$WORK_DIR/$relative_path" 2> >(sed 's/^/[path] /' >&2)); then
+    fail validation "path does not exist: ${relative_path}"
+  fi
+  case "$resolved_path" in
+    "$WORK_DIR"|"$WORK_DIR"/*) RESOLVED_REPO_PATH=$resolved_path ;;
+    *) fail validation "path escapes the repository checkout: ${relative_path}" ;;
+  esac
+}
+
+resolve_repo_path "$BUILD_CONTEXT"
+BUILD_CONTEXT_PATH=$RESOLVED_REPO_PATH
+resolve_repo_path "$DOCKERFILE"
+DOCKERFILE_PATH=$RESOLVED_REPO_PATH
+if [[ ! -d $BUILD_CONTEXT_PATH ]]; then
+  fail validation "build context is not a directory: ${BUILD_CONTEXT}"
+fi
+if [[ ! -f $DOCKERFILE_PATH ]]; then
+  fail validation "Dockerfile is not a regular file: ${DOCKERFILE}"
+fi
+
 IMAGE_REF="${DOCKERHUB_REPOSITORY}:${COMMIT_SHA}"
 log "building ${IMAGE_REF}"
-if ! run_child docker build --tag "$IMAGE_REF" "$WORK_DIR" >&2; then
+if ! run_child docker build --tag "$IMAGE_REF" --file "$DOCKERFILE_PATH" "$BUILD_CONTEXT_PATH" >&2; then
   fail build "Docker image build failed"
 fi
 
