@@ -1,0 +1,30 @@
+{
+  "name": "cloud-without-clouds",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Distributed application hosting platform on developer-owned computers",
+  "packageManager": "pnpm@10.19.0",
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:api": "turbo run dev --filter=@cloud-without-clouds/api",
+    "dev:web": "turbo run dev --filter=@cloud-without-clouds/web",
+    "dev:worker": "turbo run dev --filter=@cloud-without-clouds/worker",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "check-types": "turbo run check-types",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.72.1",
+    "@typescript-eslint/parser": "^8.72.1",
+    "eslint": "^10.14.0",
+    "prettier": "^3.5.3",
+    "turbo": "^2.4.4",
+    "typescript": "^5.8.2"
+  }
+}

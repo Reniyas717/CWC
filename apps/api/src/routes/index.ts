@@ -1,0 +1,13 @@
+import { Router } from 'express';
+import { healthRouter } from './health.js';
+import { workersRouter } from './workers.js';
+import { deploymentsRouter } from './deployments.js';
+
+export const apiRouter: Router = Router();
+
+// Mount root health check
+apiRouter.use(healthRouter);
+
+// Mount modular feature routes under /api/v1
+apiRouter.use('/api/v1/workers', workersRouter);
+apiRouter.use('/api/v1/deployments', deploymentsRouter);
