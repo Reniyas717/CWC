@@ -15,6 +15,12 @@ export class GatewayError extends Error {
   }
 }
 
+export class ReconciliationError extends GatewayError {
+  constructor(message = 'authoritative deployment state is unavailable') {
+    super(503, 'RECONCILIATION_UNAVAILABLE', message);
+  }
+}
+
 export function validateRouteInput(input) {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(input.deploymentId)) {
     throw new GatewayError(400, 'INVALID_DEPLOYMENT_ID', 'deploymentId must be a safe route identifier');
@@ -93,6 +99,20 @@ export class CaddyAdminClient {
     if (!result.ok) {
       if (previous) this.routes.set(deploymentId, previous);
       throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected the route removal (${result.status})`);
+    }
+  }
+
+  async clear() {
+    const previous = this.routes;
+    this.routes = new Map();
+    const result = await this.fetch(`${this.baseUrl}/load`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(this.#config()),
+    });
+    if (!result.ok) {
+      this.routes = previous;
+      throw new GatewayError(502, 'CADDY_UPDATE_FAILED', `Caddy rejected route reset (${result.status})`);
     }
   }
 
@@ -219,6 +239,55 @@ export class RouteManager {
     this.routes.delete(deploymentId);
   }
 
+  /**
+   * Restore routes only from the control plane's authoritative state provider.
+   * A provider failure leaves the manager empty so a stale local snapshot can
+   * never become publicly reachable after a restart.
+   */
+  async reconcile(stateProvider) {
+    if (typeof stateProvider !== 'function') {
+      throw new ReconciliationError('an authoritative state provider is required');
+    }
+
+    let desired;
+    try {
+      desired = await stateProvider();
+    } catch {
+      try {
+        await this.#clearRoutes();
+      } catch {
+        throw new ReconciliationError('authoritative state unavailable and stale routes could not be cleared');
+      }
+      this.routes.clear();
+      throw new ReconciliationError();
+    }
+    if (!Array.isArray(desired)) {
+      await this.#clearRoutes().catch(() => {});
+      this.routes.clear();
+      throw new ReconciliationError('authoritative state must be an array of deployments');
+    }
+
+    await this.#clearRoutes();
+    const restored = [];
+    try {
+      for (const route of desired) restored.push(await this.publish(route));
+    } catch (error) {
+      for (const deploymentId of [...this.routes.keys()]) await this.remove(deploymentId, { ignoreMissing: true }).catch(() => {});
+      throw error;
+    }
+    return restored;
+  }
+
+  async #clearRoutes() {
+    for (const record of this.routes.values()) record.stopTunnel?.();
+    if (typeof this.caddy.clear === 'function') {
+      await this.caddy.clear();
+    } else {
+      for (const deploymentId of this.routes.keys()) await this.caddy.remove(deploymentId);
+    }
+    this.routes.clear();
+  }
+
   get(deploymentId) {
     const record = this.routes.get(deploymentId);
     if (!record) throw new GatewayError(404, 'ROUTE_NOT_FOUND', 'deployment route was not found');
@@ -244,6 +313,12 @@ export function createGatewayServer({ manager = new RouteManager(), token = proc
     try {
       if (request.headers.authorization !== `Bearer ${token}`) {
         jsonResponse(response, 401, { success: false, error: { code: 'UNAUTHORIZED', message: 'valid gateway token required' } });
+        return;
+      }
+      if (request.method === 'POST' && request.url === '/v1/reconcile') {
+        const body = await readJson(request);
+        const result = await manager.reconcile(async () => body.routes);
+        jsonResponse(response, 200, { success: true, data: result });
         return;
       }
       const match = request.url?.match(/^\/v1\/routes\/([^/]+)$/);

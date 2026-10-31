@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloud without Clouds gateway service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cloudwithoutclouds
+WorkingDirectory=/opt/cloud-without-clouds
+EnvironmentFile=/etc/cloud-without-clouds/gateway.env
+ExecStart=/usr/bin/node /opt/cloud-without-clouds/deploy/gateway/gateway.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

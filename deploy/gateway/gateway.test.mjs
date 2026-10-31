@@ -90,6 +90,29 @@ assert.equal(tunnels[1].stopped, true);
 response = await fetch(endpoint, { headers: { authorization: 'Bearer test-token' } });
 assert.equal(response.status, 404);
 
+const restored = await manager.reconcile(async () => [{
+  deploymentId: 'restored',
+  upstreamIp: '100.70.86.53',
+  upstreamPort: healthPort,
+  healthPath: '/',
+}]);
+assert.equal(restored[0].status, 'ready');
+assert.equal(manager.get('restored').status, 'ready');
+
+response = await fetch(`http://127.0.0.1:${servicePort}/v1/reconcile`, {
+  method: 'POST',
+  headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+  body: JSON.stringify({ routes: [{ deploymentId: 'api-restored', upstreamIp: '100.70.86.53', upstreamPort: healthPort }] }),
+});
+assert.equal(response.status, 200);
+assert.equal((await response.json()).data[0].deploymentId, 'api-restored');
+
+await assert.rejects(
+  manager.reconcile(async () => { throw new Error('control plane unavailable'); }),
+  (error) => error.code === 'RECONCILIATION_UNAVAILABLE',
+);
+assert.throws(() => manager.get('restored'), /route was not found/);
+
 assert.throws(() => validateRouteInput({ deploymentId: 'bad/id', upstreamIp: '100.70.86.53', upstreamPort: 80 }), /safe route identifier/);
 assert.throws(() => validateRouteInput({ deploymentId: 'demo', upstreamIp: '127.0.0.1', upstreamPort: 80 }), /Tailscale IPv4/);
 
