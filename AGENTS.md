@@ -1,5 +1,11 @@
 # Contributor & Agent Guidelines: Cloud without Clouds
 
+## Agent skills
+
+- **Issue tracker:** For local Markdown tickets and specs, see `docs/agents/issue-tracker.md`.
+- **Triage labels:** For ticket status values, see `docs/agents/triage-labels.md`.
+- **Domain docs:** For the shared glossary and architectural decisions, see `docs/agents/domain.md`.
+
 Welcome to **Cloud without Clouds** (`cloud-without-clouds`), a distributed application hosting platform that enables developers to deploy Dockerfile-based applications from public Git repositories onto developer-owned laptops and desktop workstations acting as distributed worker nodes.
 
 This document sets down binding guidelines, technical boundaries, development workflows, and operational guardrails for both human team members and AI coding agents.
