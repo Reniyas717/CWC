@@ -7,13 +7,14 @@ import {
   ExternalLink,
   RotateCw,
   Search,
-  CheckCircle2,
   AlertCircle,
   Clock,
   Cpu,
   HardDrive,
+  Terminal,
+  StopCircle,
 } from 'lucide-react';
-import { AppConfig, AppFramework } from '@cloud-without-clouds/shared';
+import { AppConfig, AppFramework, Deployment } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -21,10 +22,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
+import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
 
 export function ApplicationsPage() {
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = React.useState(false);
+  const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
   const [searchQuery, setSearchQuery] = React.useState('');
   const [selectedFramework, setSelectedFramework] = React.useState<string>('all');
   const [actionSuccess, setActionSuccess] = React.useState<string | null>(null);
@@ -35,17 +38,26 @@ export function ApplicationsPage() {
     refetchInterval: 10000,
   });
 
-  const { data: deployments = [] } = useQuery({
+  const { data: deployments = [] } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
 
   const redeployMutation = useMutation({
     mutationFn: (appId: string) => api.triggerRedeploy(appId),
     onSuccess: (dep) => {
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
-      setActionSuccess(`Deployment ${dep.id} initiated successfully.`);
+      setActionSuccess(`Deployment ${dep.id} initiated on peer cluster.`);
+      setTimeout(() => setActionSuccess(null), 4000);
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => api.cancelDeployment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      setActionSuccess('Workload deployment cancelled.');
       setTimeout(() => setActionSuccess(null), 4000);
     },
   });
@@ -67,7 +79,7 @@ export function ApplicationsPage() {
     0
   );
 
-  const getLatestDeployment = (appId: string) => {
+  const getLatestDeployment = (appId: string): Deployment | undefined => {
     return deployments.find((d) => d.applicationId === appId);
   };
 
@@ -97,6 +109,12 @@ export function ApplicationsPage() {
             Dockerfile
           </Badge>
         );
+      case 'go':
+        return (
+          <Badge variant="outline" className="text-amber-600 dark:text-amber-400 border-amber-500/30 bg-amber-500/10">
+            Go
+          </Badge>
+        );
       default:
         return <Badge variant="outline">{framework}</Badge>;
     }
@@ -107,7 +125,7 @@ export function ApplicationsPage() {
       case 'running':
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
             Running
           </span>
         );
@@ -127,10 +145,17 @@ export function ApplicationsPage() {
             Failed
           </span>
         );
+      case 'cancelled':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+            <StopCircle className="h-3 w-3" />
+            Cancelled
+          </span>
+        );
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-secondary text-secondary-foreground">
-            Ready
+            Standby
           </span>
         );
     }
@@ -141,7 +166,10 @@ export function ApplicationsPage() {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+          <h1
+            className="text-2xl font-bold tracking-tight text-foreground"
+            style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
+          >
             Applications
           </h1>
           <p className="text-xs text-muted-foreground mt-0.5">
@@ -150,7 +178,7 @@ export function ApplicationsPage() {
         </div>
         <Button
           onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-1.5 shadow-2xs font-medium"
+          className="flex items-center gap-1.5 shadow-2xs font-semibold h-9 text-xs"
         >
           <Plus className="h-4 w-4" />
           Deploy Application
@@ -158,9 +186,9 @@ export function ApplicationsPage() {
       </div>
 
       {actionSuccess && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-emerald-600 dark:text-emerald-400 text-xs flex items-center gap-2">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          {actionSuccess}
+        <div className="p-3 bg-secondary/80 border border-border rounded-md text-foreground text-xs flex items-center justify-between gap-2">
+          <span>{actionSuccess}</span>
+          <span className="text-[10px] font-mono text-muted-foreground">Cluster Sync</span>
         </div>
       )}
 
@@ -168,13 +196,13 @@ export function ApplicationsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Configured Apps</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">Registered Workloads</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
             <div className="text-xl font-bold text-foreground">
               {apps.length}
             </div>
-            <p className="text-[11px] text-muted-foreground">Registered Git workloads</p>
+            <p className="text-[11px] text-muted-foreground">Configured Git repositories</p>
           </CardContent>
         </Card>
 
@@ -192,7 +220,7 @@ export function ApplicationsPage() {
 
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Total Allocated RAM</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">Aggregated RAM Cap</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
             <div className="text-xl font-bold text-foreground">
@@ -204,13 +232,13 @@ export function ApplicationsPage() {
 
         <Card>
           <CardHeader className="p-4 pb-1">
-            <CardTitle className="text-xs font-medium text-muted-foreground">Edge Ingress</CardTitle>
+            <CardTitle className="text-xs font-medium text-muted-foreground">Ingress Gateway</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-1">
             <div className="text-xl font-bold text-foreground">
-              Quick Tunnel
+              Caddy + Quick Tunnel
             </div>
-            <p className="text-[11px] text-muted-foreground">Automatic HTTPS live</p>
+            <p className="text-[11px] text-muted-foreground">Dynamic upstream proxy</p>
           </CardContent>
         </Card>
       </div>
@@ -227,15 +255,15 @@ export function ApplicationsPage() {
           />
         </div>
 
-        <div className="flex items-center gap-1 w-full sm:w-auto overflow-x-auto text-xs">
-          {['all', 'nodejs', 'static', 'dockerfile', 'python'].map((fw) => (
+        <div className="flex items-center gap-1 w-full sm:w-auto overflow-x-auto text-xs no-scrollbar">
+          {['all', 'nodejs', 'static', 'dockerfile', 'python', 'go'].map((fw) => (
             <button
               key={fw}
               type="button"
               onClick={() => setSelectedFramework(fw)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium capitalize transition-colors cursor-pointer shrink-0 ${
                 selectedFramework === fw
-                  ? 'bg-primary text-primary-foreground shadow-2xs'
+                  ? 'bg-primary text-primary-foreground shadow-2xs font-semibold'
                   : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
               }`}
             >
@@ -270,13 +298,13 @@ export function ApplicationsPage() {
             </div>
             <CardTitle className="text-base">No Matching Applications</CardTitle>
             <p className="text-xs text-muted-foreground">
-              Deploy your first Git repository to begin distributing workloads across connected
+              Deploy your first Git repository to begin distributing container workloads across connected
               developer laptops.
             </p>
             <Button
               onClick={() => setIsModalOpen(true)}
               size="sm"
-              className="mt-2"
+              className="mt-2 text-xs"
             >
               <Plus className="h-3.5 w-3.5 mr-1" />
               Deploy Application
@@ -287,11 +315,16 @@ export function ApplicationsPage() {
         <div className="space-y-3">
           {filteredApps.map((app) => {
             const latestDep = getLatestDeployment(app.id);
+            const isTerminal =
+              !latestDep ||
+              latestDep.state === 'stopped' ||
+              latestDep.state === 'failed' ||
+              latestDep.state === 'cancelled';
 
             return (
               <Card
                 key={app.id}
-                className="hover:border-border/80 transition-colors"
+                className="hover:border-foreground/20 transition-all"
               >
                 <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   {/* Left: App Identity & Git Source */}
@@ -313,11 +346,11 @@ export function ApplicationsPage() {
                         href={app.git.repositoryUrl}
                         target="_blank"
                         rel="noreferrer"
-                        className="flex items-center gap-1 hover:text-foreground transition-colors"
+                        className="flex items-center gap-1 hover:text-foreground transition-colors font-mono"
                       >
                         <GitBranch className="h-3.5 w-3.5" />
                         <span className="truncate max-w-xs">{app.git.repositoryUrl}</span>
-                        <span className="font-mono bg-secondary px-1.5 py-0.2 rounded text-[11px]">
+                        <span className="bg-secondary px-1.5 py-0.2 rounded text-[11px]">
                           {app.git.branch}
                         </span>
                       </a>
@@ -347,7 +380,7 @@ export function ApplicationsPage() {
 
                     {/* Live Public URL */}
                     {latestDep?.publicUrl && (
-                      <div className="pt-1 flex items-center gap-2">
+                      <div className="pt-1 flex items-center gap-2 flex-wrap">
                         <a
                           href={latestDep.publicUrl}
                           target="_blank"
@@ -367,20 +400,45 @@ export function ApplicationsPage() {
 
                   {/* Right: Actions */}
                   <div className="flex items-center gap-2 shrink-0">
+                    {latestDep && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedLogDep(latestDep)}
+                        className="text-xs h-8 px-2.5 flex items-center gap-1.5"
+                      >
+                        <Terminal className="h-3 w-3" />
+                        <span>Logs</span>
+                      </Button>
+                    )}
+
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => redeployMutation.mutate(app.id)}
                       disabled={redeployMutation.isPending}
-                      className="text-xs flex items-center gap-1"
+                      className="text-xs h-8 px-2.5 flex items-center gap-1"
                     >
                       <RotateCw
                         className={`h-3 w-3 ${
                           redeployMutation.isPending ? 'animate-spin' : ''
                         }`}
                       />
-                      Redeploy
+                      <span>Redeploy</span>
                     </Button>
+
+                    {!isTerminal && latestDep && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => cancelMutation.mutate(latestDep.id)}
+                        disabled={cancelMutation.isPending}
+                        className="text-xs h-8 px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        title="Cancel active build or container"
+                      >
+                        <StopCircle className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -391,6 +449,13 @@ export function ApplicationsPage() {
 
       {/* New Application Deployment Modal */}
       <NewApplicationModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
+
+      {/* Terminal Log Viewer Modal */}
+      <DeploymentLogsModal
+        deployment={selectedLogDep}
+        isOpen={!!selectedLogDep}
+        onClose={() => setSelectedLogDep(null)}
+      />
     </div>
   );
 }

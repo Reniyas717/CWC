@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   Cloud,
   Cpu,
@@ -12,13 +13,16 @@ import {
   Menu,
   X,
   ExternalLink,
+  Workflow,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
+import { api } from '@/services/api';
 
 interface NavItem {
   label: string;
   path: string;
   icon: React.ComponentType<{ className?: string }>;
+  badgeKey?: 'workers' | 'deployments' | 'logs';
 }
 
 const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
@@ -30,8 +34,9 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     group: 'Compute',
     items: [
       { label: 'Applications', path: '/apps', icon: Layers },
-      { label: 'Worker Nodes', path: '/workers', icon: Cpu },
-      { label: 'Deployments', path: '/deployments', icon: Terminal },
+      { label: 'Worker Nodes', path: '/workers', icon: Cpu, badgeKey: 'workers' },
+      { label: 'Deployments', path: '/deployments', icon: Workflow, badgeKey: 'deployments' },
+      { label: 'Cluster Logs', path: '/logs', icon: Terminal, badgeKey: 'logs' },
     ],
   },
   {
@@ -49,6 +54,22 @@ export function AppLayout() {
     return false;
   });
   const [isMobileOpen, setIsMobileOpen] = React.useState(false);
+
+  // Live cluster stats for sidebar badges
+  const { data: workers = [] } = useQuery({
+    queryKey: ['workers'],
+    queryFn: () => api.getWorkers(),
+    refetchInterval: 10000,
+  });
+
+  const { data: deployments = [] } = useQuery({
+    queryKey: ['deployments'],
+    queryFn: () => api.getDeployments(),
+    refetchInterval: 10000,
+  });
+
+  const onlineWorkersCount = workers.filter((w) => w.state !== 'offline').length;
+  const activeDeploymentsCount = deployments.filter((d) => d.state === 'running').length;
 
   // Close mobile drawer on route change
   React.useEffect(() => {
@@ -73,11 +94,58 @@ export function AppLayout() {
         return 'Worker Nodes';
       case '/deployments':
         return 'Deployments';
+      case '/logs':
+        return 'Cluster Logs';
       case '/settings':
         return 'Settings';
       default:
         return 'Console';
     }
+  };
+
+  const renderBadge = (key?: NavItem['badgeKey'], isActive?: boolean) => {
+    if (!key) return null;
+    if (key === 'workers') {
+      return (
+        <span
+          className={`ml-auto text-[10px] font-mono px-1.5 py-0.2 rounded transition-colors ${
+            isActive
+              ? 'bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground font-semibold'
+              : 'bg-secondary text-muted-foreground'
+          }`}
+        >
+          {onlineWorkersCount}
+        </span>
+      );
+    }
+    if (key === 'deployments') {
+      return (
+        <span
+          className={`ml-auto text-[10px] font-mono px-1.5 py-0.2 rounded transition-colors ${
+            isActive
+              ? 'bg-sidebar-primary-foreground/20 text-sidebar-primary-foreground font-semibold'
+              : 'bg-secondary text-muted-foreground'
+          }`}
+        >
+          {activeDeploymentsCount}
+        </span>
+      );
+    }
+    if (key === 'logs') {
+      return (
+        <span className="ml-auto flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span
+            className={`text-[9px] font-mono uppercase tracking-wider ${
+              isActive ? 'text-sidebar-primary-foreground' : 'text-emerald-600 dark:text-emerald-400'
+            }`}
+          >
+            Live
+          </span>
+        </span>
+      );
+    }
+    return null;
   };
 
   return (
@@ -196,7 +264,12 @@ export function AppLayout() {
                       }
                     >
                       <Icon className="h-4 w-4 shrink-0" />
-                      {!isCollapsed && <span className="truncate">{item.label}</span>}
+                      {!isCollapsed && (
+                        <>
+                          <span className="truncate">{item.label}</span>
+                          {renderBadge(item.badgeKey, location.pathname === item.path)}
+                        </>
+                      )}
                     </NavLink>
                   );
                 })}
@@ -258,15 +331,18 @@ export function AppLayout() {
                       to={item.path}
                       end={item.path === '/'}
                       className={({ isActive }) =>
-                        `flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        `flex items-center justify-between px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                           isActive
                             ? 'bg-sidebar-primary text-sidebar-primary-foreground font-semibold'
                             : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                         }`
                       }
                     >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      <span>{item.label}</span>
+                      <div className="flex items-center gap-3">
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span>{item.label}</span>
+                      </div>
+                      {renderBadge(item.badgeKey, location.pathname === item.path)}
                     </NavLink>
                   );
                 })}

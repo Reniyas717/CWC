@@ -1,19 +1,22 @@
-import { useQuery } from '@tanstack/react-query';
+import * as React from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Terminal,
   GitBranch,
-  Rocket,
   ExternalLink,
-  Clock,
   AlertCircle,
   CheckCircle2,
   Loader,
   Container,
+  Layers,
+  StopCircle,
 } from 'lucide-react';
 import { Deployment } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
 
 function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
   if (state === 'running') {
@@ -40,11 +43,19 @@ function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
       </span>
     );
   }
-  if (state === 'stopped' || state === 'cancelled') {
+  if (state === 'cancelled') {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <StopCircle className="h-3 w-3" />
+        Cancelled
+      </span>
+    );
+  }
+  if (state === 'stopped') {
     return (
       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium bg-secondary text-muted-foreground border border-border">
         <CheckCircle2 className="h-3 w-3" />
-        {state.charAt(0).toUpperCase() + state.slice(1)}
+        Stopped
       </span>
     );
   }
@@ -66,14 +77,25 @@ function timeAgo(iso: string) {
 }
 
 export function DeploymentsPage() {
+  const queryClient = useQueryClient();
+  const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
+
   const { data: deployments = [], isLoading } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
-    refetchInterval: 10000,
+    refetchInterval: 5000,
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => api.cancelDeployment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+    },
   });
 
   const runningCount = deployments.filter((d) => d.state === 'running').length;
   const failedCount = deployments.filter((d) => d.state === 'failed').length;
+  const activeIngressCount = deployments.filter((d) => d.state === 'running' && !!d.publicUrl).length;
 
   return (
     <div className="space-y-8">
@@ -86,27 +108,20 @@ export function DeploymentsPage() {
           Deployments
         </h1>
         <p className="text-sm text-muted-foreground">
-          Live build logs and containerised workload history across all peer worker nodes.
+          Live build logs, worker container lifecycle, and dynamic edge route assignments.
         </p>
       </div>
 
       {/* Summary Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Total Deployments', value: String(deployments.length), icon: Rocket },
-          { label: 'Running', value: String(runningCount), icon: Container },
-          { label: 'Failed', value: String(failedCount), icon: AlertCircle },
+          { label: 'Total Deployments', value: String(deployments.length), icon: Layers },
+          { label: 'Active Containers', value: String(runningCount), icon: Container },
+          { label: 'Ingress Tunnels', value: String(activeIngressCount), icon: ExternalLink },
           {
-            label: 'Last Deploy',
-            value:
-              deployments.length > 0
-                ? timeAgo(
-                    deployments.reduce((latest, d) =>
-                      d.createdAt > latest.createdAt ? d : latest
-                    ).createdAt
-                  )
-                : '—',
-            icon: Clock,
+            label: 'Failed / Error',
+            value: String(failedCount),
+            icon: AlertCircle,
           },
         ].map((m) => {
           const Icon = m.icon;
@@ -146,77 +161,128 @@ export function DeploymentsPage() {
             <div className="h-10 w-10 rounded-full bg-secondary flex items-center justify-center mx-auto">
               <Terminal className="h-5 w-5 text-muted-foreground" />
             </div>
-            <p className="text-sm font-medium text-foreground">No Deployments Yet</p>
+            <p className="text-sm font-medium text-foreground">No Deployments Found</p>
             <p className="text-xs text-muted-foreground">
-              Trigger a deployment from the Applications page once worker nodes are connected.
+              Queue a deployment from the Applications page to trigger least-loaded placement across peer nodes.
             </p>
           </div>
         </Card>
       ) : (
         <div className="space-y-3">
-          {deployments.map((dep) => (
-            <Card key={dep.id}>
-              <CardHeader className="p-5 pb-3">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div className="space-y-1 min-w-0">
-                    <CardTitle className="text-sm font-semibold text-foreground font-mono">
-                      {dep.id}
-                    </CardTitle>
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono flex-wrap">
-                      <GitBranch className="h-3 w-3" />
-                      <span>{dep.gitBranch}</span>
-                      <span>@</span>
-                      <span className="bg-secondary px-1.5 py-0.5 rounded">{dep.gitCommitHash}</span>
-                      <span>•</span>
-                      <span>v{dep.version}</span>
-                      <span>•</span>
-                      <span>{timeAgo(dep.createdAt)}</span>
+          {deployments.map((dep) => {
+            const isTerminal =
+              dep.state === 'stopped' || dep.state === 'failed' || dep.state === 'cancelled';
+            const isCancelling = cancelMutation.isPending && cancelMutation.variables === dep.id;
+
+            return (
+              <Card key={dep.id} className="hover:border-foreground/20 transition-all">
+                <CardHeader className="p-5 pb-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <CardTitle className="text-sm font-semibold text-foreground font-mono">
+                          {dep.id}
+                        </CardTitle>
+                        <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground border border-border">
+                          {dep.applicationId}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono flex-wrap">
+                        <GitBranch className="h-3 w-3" />
+                        <span>{dep.gitBranch}</span>
+                        <span>@</span>
+                        <span className="bg-secondary px-1.5 py-0.2 rounded">{dep.gitCommitHash || 'head'}</span>
+                        <span>•</span>
+                        <span>v{dep.version}</span>
+                        <span>•</span>
+                        <span>{timeAgo(dep.createdAt)}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <DeploymentStateBadge state={dep.state} />
                     </div>
                   </div>
-                  <DeploymentStateBadge state={dep.state} />
-                </div>
-              </CardHeader>
-              <CardContent className="px-5 pb-5 space-y-3">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-[11px]">
-                  <div className="space-y-0.5">
-                    <span className="text-muted-foreground uppercase tracking-wide font-medium">
-                      Worker
-                    </span>
-                    <p className="font-mono text-foreground">{dep.workerId ?? '—'}</p>
+                </CardHeader>
+                <CardContent className="px-5 pb-5 space-y-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-[11px]">
+                    <div className="space-y-0.5">
+                      <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
+                        Target Worker
+                      </span>
+                      <p className="font-mono text-foreground truncate">{dep.workerId ?? 'Auto-selecting...'}</p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
+                        Container ID
+                      </span>
+                      <p className="font-mono text-foreground truncate">{dep.containerId ?? 'Pending runtime...'}</p>
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
+                        Assigned Host Port
+                      </span>
+                      <p className="font-mono text-foreground">{dep.assignedPort ? `:${dep.assignedPort}` : 'Ephemeral (-p 0:port)'}</p>
+                    </div>
                   </div>
-                  <div className="space-y-0.5">
-                    <span className="text-muted-foreground uppercase tracking-wide font-medium">
-                      Container
-                    </span>
-                    <p className="font-mono text-foreground">{dep.containerId ?? '—'}</p>
-                  </div>
-                  <div className="space-y-0.5">
-                    <span className="text-muted-foreground uppercase tracking-wide font-medium">
-                      Port
-                    </span>
-                    <p className="font-mono text-foreground">{dep.assignedPort ?? '—'}</p>
-                  </div>
-                </div>
 
-                {dep.publicUrl && (
-                  <div className="pt-2 border-t border-border">
-                    <a
-                      href={dep.publicUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 text-xs font-mono text-foreground hover:underline"
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      {dep.publicUrl}
-                      <ExternalLink className="h-3 w-3 opacity-60" />
-                    </a>
+                  {/* Public URL and Row Actions */}
+                  <div className="pt-3 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    {dep.publicUrl ? (
+                      <a
+                        href={dep.publicUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-mono text-foreground hover:underline"
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>{dep.publicUrl}</span>
+                        <ExternalLink className="h-3 w-3 opacity-60" />
+                      </a>
+                    ) : (
+                      <span className="text-[11px] font-mono text-muted-foreground">
+                        Ingress route: awaiting container health check (200 OK)
+                      </span>
+                    )}
+
+                    {/* Action Buttons: View Logs & Cancel */}
+                    <div className="flex items-center gap-2 ml-auto">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedLogDep(dep)}
+                        className="h-7.5 px-2.5 text-xs flex items-center gap-1.5"
+                      >
+                        <Terminal className="h-3 w-3" />
+                        <span>View Logs</span>
+                      </Button>
+
+                      {!isTerminal && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => cancelMutation.mutate(dep.id)}
+                          disabled={isCancelling}
+                          className="h-7.5 px-2.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        >
+                          <StopCircle className="h-3 w-3" />
+                          <span>{isCancelling ? 'Cancelling...' : 'Cancel'}</span>
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
+
+      {/* Terminal Log Viewer Modal */}
+      <DeploymentLogsModal
+        deployment={selectedLogDep}
+        isOpen={!!selectedLogDep}
+        onClose={() => setSelectedLogDep(null)}
+      />
     </div>
   );
 }

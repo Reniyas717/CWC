@@ -69,6 +69,15 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
   ]);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   const handleNameChange = (val: string) => {
     setName(val);
     const generated = val
@@ -214,7 +223,12 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
       : `${replicas * memoryLimitMb} MB`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-background/80 backdrop-blur-xs no-scrollbar overflow-y-auto">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-background/80 backdrop-blur-xs no-scrollbar overflow-y-auto"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div className="relative w-full max-w-4xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden text-foreground">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card shrink-0">
@@ -476,13 +490,39 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                 {/* Port & Replicas */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[11px] text-muted-foreground">Target Port</label>
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-muted-foreground">Target Port</label>
+                      <div className="flex items-center gap-1">
+                        {[3000, 8080, 80].map((quickPort) => (
+                          <button
+                            key={quickPort}
+                            type="button"
+                            onClick={() => setPort(quickPort)}
+                            className={`text-[9px] font-mono px-1.5 py-0.2 rounded transition-colors cursor-pointer border ${
+                              port === quickPort
+                                ? 'bg-primary text-primary-foreground border-primary font-semibold'
+                                : 'bg-background text-muted-foreground border-border hover:bg-secondary hover:text-foreground'
+                            }`}
+                          >
+                            {quickPort}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                     <Input
-                      type="number"
-                      min={1}
-                      max={65535}
-                      value={port}
-                      onChange={(e) => setPort(Number(e.target.value))}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={port === 0 ? '' : String(port)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/\D/g, '');
+                        if (!raw) {
+                          setPort(0);
+                        } else {
+                          const val = parseInt(raw, 10);
+                          if (val <= 65535) setPort(val);
+                        }
+                      }}
                       required
                       placeholder="3000"
                       className="h-8 text-xs font-mono bg-background"
@@ -490,7 +530,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                   </div>
                   <div className="space-y-1">
                     <label className="text-[11px] text-muted-foreground">Replicas</label>
-                    <div className="flex items-center rounded-md border border-input bg-background h-8 px-1">
+                    <div className="flex items-center rounded-md border border-border bg-background h-8 px-1">
                       <button
                         type="button"
                         onClick={() => setReplicas((prev) => Math.max(1, prev - 1))}
