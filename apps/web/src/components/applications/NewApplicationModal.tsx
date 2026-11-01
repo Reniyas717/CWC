@@ -63,7 +63,9 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
   const [replicas, setReplicas] = React.useState(1);
   const [cpuLimitCores, setCpuLimitCores] = React.useState(1.0);
   const [memoryLimitMb, setMemoryLimitMb] = React.useState(512);
-  const [activeTemplate, setActiveTemplate] = React.useState<'custom' | 'express' | 'static' | 'python'>('custom');
+  const [activeTemplate, setActiveTemplate] = React.useState<
+    'custom' | 'express' | 'static' | 'python'
+  >('custom');
   const [envVars, setEnvVars] = React.useState<EnvRow[]>([
     { key: 'NODE_ENV', value: 'production', isSecret: false },
   ]);
@@ -105,9 +107,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
   };
 
   const updateEnvRow = (index: number, field: keyof EnvRow, value: string | boolean) => {
-    setEnvVars((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
-    );
+    setEnvVars((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   };
 
   const applyPreset = (presetType: 'express' | 'static' | 'python') => {
@@ -229,11 +229,11 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-4xl bg-card border border-border rounded-xl shadow-2xl flex flex-col max-h-[88vh] overflow-hidden text-foreground">
+      <div className="relative w-full max-w-4xl bg-card border border-border rounded-md shadow-2xl flex flex-col max-h-[88vh] overflow-hidden text-foreground">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card shrink-0">
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+            <div className="h-8 w-8 rounded-md bg-secondary flex items-center justify-center shrink-0">
               <Layers className="h-4 w-4 text-foreground" />
             </div>
             <div>
@@ -332,9 +332,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-foreground">
-                        URL Slug
-                      </label>
+                      <label className="text-xs font-medium text-foreground">URL Slug</label>
                       <Input
                         placeholder="express-api-gateway"
                         value={slug}
@@ -352,7 +350,10 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                     <div className="flex items-center gap-1.5 text-[11px] font-mono text-muted-foreground px-2 py-1 rounded bg-secondary/40 border border-border">
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground shrink-0" />
                       <span className="truncate">
-                        Public route: <span className="text-foreground">assigned after the deployment is healthy</span>
+                        Public route:{' '}
+                        <span className="text-foreground">
+                          assigned after the deployment is healthy
+                        </span>
                       </span>
                     </div>
                   )}
@@ -403,7 +404,9 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                 <div className="space-y-2 pt-3 border-t border-border">
                   <div className="flex items-center justify-between text-xs">
                     <label className="font-medium text-foreground">Runtime Framework</label>
-                    <span className="text-[11px] font-mono text-muted-foreground">Default port: {port}</span>
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      Default port: {port}
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -415,7 +418,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                           key={fw.value}
                           type="button"
                           onClick={() => handleFrameworkChange(fw.value)}
-                          className={`px-3 py-2 rounded-lg text-left text-xs transition-all cursor-pointer flex items-center gap-2 border ${
+                          className={`px-3 py-2 rounded-md text-left text-xs transition-all cursor-pointer flex items-center gap-2 border ${
                             isSelected
                               ? 'bg-secondary border-foreground/50 text-foreground font-semibold shadow-2xs'
                               : 'bg-background border-border text-muted-foreground hover:bg-secondary/40 hover:text-foreground'
@@ -432,7 +435,9 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                 {/* Environment Variables */}
                 <div className="space-y-2 pt-3 border-t border-border">
                   <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-foreground">Environment Variables</label>
+                    <label className="text-xs font-medium text-foreground">
+                      Environment Variables
+                    </label>
                     <button
                       type="button"
                       onClick={addEnvRow}
@@ -444,7 +449,9 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                   </div>
 
                   {envVars.length === 0 ? (
-                    <p className="text-[11px] text-muted-foreground italic">No environment variables set.</p>
+                    <p className="text-[11px] text-muted-foreground italic">
+                      No environment variables set.
+                    </p>
                   ) : (
                     <div className="space-y-1.5 max-h-32 overflow-y-auto no-scrollbar pr-0.5">
                       {envVars.map((row, idx) => (
@@ -476,7 +483,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
               </div>
 
               {/* Right Column: Deployment Inspector / Hardware Allocation (~42%) */}
-              <div className="lg:col-span-5 space-y-4 bg-secondary/20 p-4.5 rounded-xl border border-border">
+              <div className="lg:col-span-5 space-y-4 bg-secondary/20 p-4.5 rounded-md border border-border">
                 <div className="flex items-center justify-between pb-2 border-b border-border">
                   <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                     <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
@@ -632,7 +639,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                   </div>
                 </div>
 
-                <div className="p-2.5 rounded-lg bg-secondary/50 border border-border text-[11px] text-muted-foreground flex items-center gap-2">
+                <div className="p-2.5 rounded-md bg-secondary/50 border border-border text-[11px] text-muted-foreground flex items-center gap-2">
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                   <span>Assigned to lowest-load worker node across peer mesh.</span>
                 </div>

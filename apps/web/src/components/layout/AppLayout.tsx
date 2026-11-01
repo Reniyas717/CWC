@@ -17,6 +17,7 @@ import {
   Scale,
   Laptop,
   LogOut,
+  Coins,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { api } from '@/services/api';
@@ -31,7 +32,10 @@ interface NavItem {
 const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
   {
     group: 'Platform',
-    items: [{ label: 'Dashboard', path: '/', icon: LayoutDashboard }],
+    items: [
+      { label: 'Dashboard', path: '/', icon: LayoutDashboard },
+      { label: 'FinOps Arbitrage', path: '/finops', icon: Coins },
+    ],
   },
   {
     group: 'Compute',
@@ -92,6 +96,8 @@ export function AppLayout({ onSignOut }: { onSignOut: () => void }) {
     switch (location.pathname) {
       case '/':
         return 'Overview';
+      case '/finops':
+        return 'FinOps & Cost Arbitrage';
       case '/apps':
         return 'Applications';
       case '/workers':
@@ -145,7 +151,9 @@ export function AppLayout({ onSignOut }: { onSignOut: () => void }) {
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span
             className={`text-[9px] font-mono uppercase tracking-wider ${
-              isActive ? 'text-sidebar-primary-foreground' : 'text-emerald-600 dark:text-emerald-400'
+              isActive
+                ? 'text-sidebar-primary-foreground'
+                : 'text-emerald-600 dark:text-emerald-400'
             }`}
           >
             Live
@@ -325,9 +333,7 @@ export function AppLayout({ onSignOut }: { onSignOut: () => void }) {
               <div className="h-7 w-7 rounded-md bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center font-bold">
                 <Cloud className="h-4 w-4" />
               </div>
-              <span className="font-semibold text-sm text-foreground">
-                Cloud Without Clouds
-              </span>
+              <span className="font-semibold text-sm text-foreground">Cloud Without Clouds</span>
             </div>
             <button
               type="button"
@@ -374,7 +380,9 @@ export function AppLayout({ onSignOut }: { onSignOut: () => void }) {
 
           <div className="p-4 border-t border-sidebar-border text-xs text-muted-foreground font-mono">
             <div>Peer Mesh Fabric</div>
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">Control Plane API :4000</div>
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">
+              Control Plane API :4000
+            </div>
           </div>
         </aside>
 

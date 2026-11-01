@@ -93,15 +93,16 @@ export function LogsPage() {
     setCurrentPage(1);
   };
 
-  const tailStatus = isDeploymentsError || isLogsError
-    ? 'Unavailable'
-    : isLoading
-      ? 'Connecting'
-      : isTailPolling
-        ? 'Polling'
-        : activeDep
-          ? 'Idle'
-          : 'No deployment';
+  const tailStatus =
+    isDeploymentsError || isLogsError
+      ? 'Unavailable'
+      : isLoading
+        ? 'Connecting'
+        : isTailPolling
+          ? 'Polling'
+          : activeDep
+            ? 'Idle'
+            : 'No deployment';
 
   // Auto-scroll
   React.useEffect(() => {

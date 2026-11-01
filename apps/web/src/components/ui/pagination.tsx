@@ -1,9 +1,4 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from './button';
 
@@ -164,7 +159,9 @@ export function Pagination({
                     onClick={() => onPageChange(p)}
                     className={cn(
                       'h-7 min-w-[28px] px-2 text-[11px] font-mono',
-                      isActive ? 'font-bold shadow-xs' : 'text-muted-foreground hover:text-foreground'
+                      isActive
+                        ? 'font-bold shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
                     )}
                     aria-current={isActive ? 'page' : undefined}
                   >

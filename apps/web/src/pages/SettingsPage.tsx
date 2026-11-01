@@ -41,14 +41,16 @@ const SECTIONS: Section[] = [
     id: 'api',
     title: 'Control Plane API',
     badge: 'Express 4 ESM',
-    description: 'Active HTTP endpoint for the Express control plane orchestrating worker nodes and deployments.',
+    description:
+      'Active HTTP endpoint for the Express control plane orchestrating worker nodes and deployments.',
     icon: Server,
     rows: [
       {
         label: 'Base API Endpoint',
-        value: typeof window !== 'undefined'
-          ? (import.meta.env.VITE_API_URL || 'http://localhost:4000')
-          : 'http://localhost:4000',
+        value:
+          typeof window !== 'undefined'
+            ? import.meta.env.VITE_API_URL || 'http://localhost:4000'
+            : 'http://localhost:4000',
         description: 'Primary REST API control plane interface',
         mono: true,
         copyable: true,
@@ -81,7 +83,8 @@ const SECTIONS: Section[] = [
     id: 'data',
     title: 'Data Infrastructure',
     badge: 'Docker Compose',
-    description: 'Persistent relational storage via PostgreSQL 16 and asynchronous task queues via Redis 7.',
+    description:
+      'Persistent relational storage via PostgreSQL 16 and asynchronous task queues via Redis 7.',
     icon: Database,
     rows: [
       {
@@ -115,7 +118,8 @@ const SECTIONS: Section[] = [
     id: 'network',
     title: 'Networking & Ingress',
     badge: 'Tailscale + Cloudflare',
-    description: 'Zero-cost private WireGuard mesh connecting worker nodes with public HTTPS tunnel fallback.',
+    description:
+      'Zero-cost private WireGuard mesh connecting worker nodes with public HTTPS tunnel fallback.',
     icon: Globe,
     rows: [
       {
@@ -148,14 +152,16 @@ const SECTIONS: Section[] = [
     id: 'security',
     title: 'Security & Auth Tokens',
     badge: 'Mandatory Sandbox',
-    description: 'Bearer token verification policies and hard kernel-level container resource caps.',
+    description:
+      'Bearer token verification policies and hard kernel-level container resource caps.',
     icon: Shield,
     rows: [
       {
         label: 'Admin Authorization',
-        value: typeof window !== 'undefined'
-          ? (import.meta.env.VITE_ADMIN_TOKEN || 'cwc-admin-token-super-secret-dev')
-          : 'cwc-admin-token-super-secret-dev',
+        value:
+          typeof window !== 'undefined'
+            ? import.meta.env.VITE_ADMIN_TOKEN || 'cwc-admin-token-super-secret-dev'
+            : 'cwc-admin-token-super-secret-dev',
         description: 'Required Bearer token for mutating /api/v1/deployments calls',
         mono: true,
         copyable: true,
@@ -224,7 +230,10 @@ export function SettingsPage() {
   const [activeCategory, setActiveCategory] = React.useState<string>('all');
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
   const [revealedSecrets, setRevealedSecrets] = React.useState<Record<string, boolean>>({});
-  const [pingStatus, setPingStatus] = React.useState<{ status: 'idle' | 'checking' | 'ok' | 'error'; ms?: number }>({
+  const [pingStatus, setPingStatus] = React.useState<{
+    status: 'idle' | 'checking' | 'ok' | 'error';
+    ms?: number;
+  }>({
     status: 'idle',
   });
 
@@ -256,9 +265,7 @@ export function SettingsPage() {
   };
 
   const visibleSections =
-    activeCategory === 'all'
-      ? SECTIONS
-      : SECTIONS.filter((s) => s.id === activeCategory);
+    activeCategory === 'all' ? SECTIONS : SECTIONS.filter((s) => s.id === activeCategory);
 
   return (
     <div className="space-y-8">
@@ -272,7 +279,8 @@ export function SettingsPage() {
             Platform Settings
           </h1>
           <p className="text-sm text-muted-foreground">
-            Environment configuration, network mesh topology, and security credentials for this cluster.
+            Environment configuration, network mesh topology, and security credentials for this
+            cluster.
           </p>
         </div>
 
@@ -488,7 +496,8 @@ export function SettingsPage() {
               Runtime Architecture & Team Guardrails
             </span>
             <p className="text-muted-foreground text-[11px]">
-              Detailed domain models, scheduling score S(W), and lifecycle state diagrams are documented in ARCHITECTURE.md.
+              Detailed domain models, scheduling score S(W), and lifecycle state diagrams are
+              documented in ARCHITECTURE.md.
             </p>
           </div>
           <a

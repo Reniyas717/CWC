@@ -315,7 +315,8 @@ export function EqualizerPage() {
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-              Capacity-weighted balancing: 16 GB workstations carry heavier workloads so smaller laptops stay fast and cool.
+              Capacity-weighted balancing: 16 GB workstations carry heavier workloads so smaller
+              laptops stay fast and cool.
             </p>
           </div>
 
@@ -414,8 +415,8 @@ export function EqualizerPage() {
             notification.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
               : notification.type === 'error'
-              ? 'bg-destructive/10 border-destructive/20 text-destructive'
-              : 'bg-primary/5 border-primary/20 text-foreground'
+                ? 'bg-destructive/10 border-destructive/20 text-destructive'
+                : 'bg-primary/5 border-primary/20 text-foreground'
           }`}
         >
           <div className="flex items-start gap-2.5">
@@ -468,7 +469,9 @@ export function EqualizerPage() {
           <Card className="p-10 text-center text-muted-foreground">
             <Server className="h-10 w-10 mx-auto mb-2 opacity-30" />
             <p className="text-sm font-semibold text-foreground">No worker nodes connected</p>
-            <p className="text-xs mt-1">Start a worker on your workstation to join the peer mesh.</p>
+            <p className="text-xs mt-1">
+              Start a worker on your workstation to join the peer mesh.
+            </p>
           </Card>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -498,7 +501,10 @@ export function EqualizerPage() {
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h3 className="font-bold text-sm text-foreground truncate" title={device.worker.name}>
+                            <h3
+                              className="font-bold text-sm text-foreground truncate"
+                              title={device.worker.name}
+                            >
                               {device.worker.name}
                             </h3>
                             <p className="text-[11px] font-mono text-muted-foreground">
@@ -528,8 +534,8 @@ export function EqualizerPage() {
                               isHeavy
                                 ? 'bg-amber-500'
                                 : device.loadPercentage > 0
-                                ? 'bg-emerald-500'
-                                : 'bg-muted-foreground/30'
+                                  ? 'bg-emerald-500'
+                                  : 'bg-muted-foreground/30'
                             }`}
                             style={{ width: `${Math.max(device.loadPercentage, 4)}%` }}
                           />
@@ -606,10 +612,10 @@ export function EqualizerPage() {
                                     const shortName = other.name.includes('Alpha')
                                       ? 'Alpha'
                                       : other.name.includes('Beta')
-                                      ? 'Beta'
-                                      : other.name.includes('Gamma')
-                                      ? 'Gamma'
-                                      : other.name.split(' ')[0];
+                                        ? 'Beta'
+                                        : other.name.includes('Gamma')
+                                          ? 'Gamma'
+                                          : other.name.split(' ')[0];
 
                                     return (
                                       <button
@@ -654,10 +660,13 @@ export function EqualizerPage() {
             <Info className="h-3.5 w-3.5 text-foreground" />
           </div>
           <div>
-            <span className="font-semibold text-foreground">Why Capacity-Weighted Equalization?</span>
+            <span className="font-semibold text-foreground">
+              Why Capacity-Weighted Equalization?
+            </span>
             <p className="text-[11px] mt-0.5">
-              1 GB of RAM is 6% of a 16 GB workstation, but 50% of a 2 GB laptop. Equalizing guarantees
-              that smaller devices are never overwhelmed while powerful machines sit idle.
+              1 GB of RAM is 6% of a 16 GB workstation, but 50% of a 2 GB laptop. Equalizing
+              guarantees that smaller devices are never overwhelmed while powerful machines sit
+              idle.
             </p>
           </div>
         </div>

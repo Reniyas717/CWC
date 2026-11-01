@@ -24,11 +24,7 @@ interface DeploymentLogsModalProps {
   onClose: () => void;
 }
 
-export function DeploymentLogsModal({
-  deployment,
-  isOpen,
-  onClose,
-}: DeploymentLogsModalProps) {
+export function DeploymentLogsModal({ deployment, isOpen, onClose }: DeploymentLogsModalProps) {
   const [streamFilter, setStreamFilter] = React.useState<string>('all');
   const [searchQuery, setSearchQuery] = React.useState('');
   const [isCopied, setIsCopied] = React.useState(false);
@@ -46,7 +42,8 @@ export function DeploymentLogsModal({
     queryKey: ['deployment-logs', deployment?.id],
     queryFn: () => (deployment ? api.getDeploymentLogs(deployment.id) : Promise.resolve([])),
     enabled: isOpen && !!deployment,
-    refetchInterval: deployment?.state === 'running' || deployment?.state === 'building' ? 3000 : false,
+    refetchInterval:
+      deployment?.state === 'running' || deployment?.state === 'building' ? 3000 : false,
   });
 
   // Filter logs
@@ -72,7 +69,10 @@ export function DeploymentLogsModal({
 
   const handleCopyLogs = () => {
     const text = filteredLogs
-      .map((l) => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.stream.toUpperCase()}] [${l.level.toUpperCase()}] ${l.message}`)
+      .map(
+        (l) =>
+          `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.stream.toUpperCase()}] [${l.level.toUpperCase()}] ${l.message}`
+      )
       .join('\n');
     navigator.clipboard.writeText(text);
     setIsCopied(true);
@@ -153,7 +153,10 @@ export function DeploymentLogsModal({
                 {getStatusBadge()}
               </div>
               <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                Worker: <span className="font-mono text-foreground">{deployment.workerId || 'pending assignment'}</span>
+                Worker:{' '}
+                <span className="font-mono text-foreground">
+                  {deployment.workerId || 'pending assignment'}
+                </span>
                 {deployment.assignedPort && ` • Port ${deployment.assignedPort}`}
               </p>
             </div>
@@ -180,7 +183,11 @@ export function DeploymentLogsModal({
               className="h-7.5 px-2.5 text-xs flex items-center gap-1"
               title="Copy filtered logs"
             >
-              {isCopied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+              {isCopied ? (
+                <Check className="h-3 w-3 text-emerald-500" />
+              ) : (
+                <Copy className="h-3 w-3" />
+              )}
               <span className="hidden sm:inline">{isCopied ? 'Copied' : 'Copy'}</span>
             </Button>
 
@@ -263,7 +270,11 @@ export function DeploymentLogsModal({
               <span>Fetching container log stream...</span>
             </div>
           ) : isError ? (
-            <DataError title="Unable to load deployment logs" error={error} onRetry={() => void refetch()} />
+            <DataError
+              title="Unable to load deployment logs"
+              error={error}
+              onRetry={() => void refetch()}
+            />
           ) : filteredLogs.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-48 text-muted-foreground space-y-1">
               <p>No log entries found for this filter.</p>
@@ -305,9 +316,7 @@ export function DeploymentLogsModal({
                   >
                     {log.stream}
                   </span>
-                  <span className={`flex-1 break-all ${levelColor}`}>
-                    {log.message}
-                  </span>
+                  <span className={`flex-1 break-all ${levelColor}`}>{log.message}</span>
                 </div>
               );
             })
@@ -319,7 +328,9 @@ export function DeploymentLogsModal({
         <div className="px-5 py-2.5 border-t border-border bg-card flex items-center justify-between text-[11px] text-muted-foreground shrink-0 font-mono">
           <div className="flex items-center gap-2">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Buffer: {filteredLogs.length} / {logs.length} entries</span>
+            <span>
+              Buffer: {filteredLogs.length} / {logs.length} entries
+            </span>
           </div>
           <div>
             <span>ESC to close • Press Export to save</span>

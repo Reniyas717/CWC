@@ -112,6 +112,29 @@ export interface ClusterRebalanceResult {
   executedAt: string;
 }
 
+export interface FinOpsSummary {
+  nodeCount: number;
+  totalVcpus: number;
+  totalMemoryMb: number;
+  totalMemoryGb: number;
+  activeWorkloadsCount: number;
+  readyRoutesCount: number;
+  awsInstanceEquivalent: string;
+  awsComputeCostMonthly: number;
+  awsNetworkingCostMonthly: number;
+  awsTotalCostMonthly: number;
+  awsTotalCostAnnual: number;
+  cwcCostMonthly: number;
+  cwcCostAnnual: number;
+  monthlySavings: number;
+  annualSavings: number;
+  savingsRatePerMinute: number;
+  savingsRatePerSecond: number;
+  carbonOffsetKgMonthly: number;
+  treesEquivalentAnnual: number;
+  calculatedAt: string;
+}
+
 async function getApiErrorMessage(response: Response): Promise<string> {
   try {
     const body: unknown = await response.json();
@@ -130,7 +153,6 @@ async function getApiErrorMessage(response: Response): Promise<string> {
 
   return `Control plane rejected the deployment request (HTTP ${response.status}).`;
 }
-
 
 function loadLocalApps(): AppConfig[] {
   try {
@@ -167,7 +189,6 @@ function saveLocalDeployments(deps: Deployment[]): void {
     console.warn('Failed to save deployments cache', err);
   }
 }
-
 
 function computeFallbackWorkerScores(
   workers: WorkerNode[],
@@ -259,6 +280,7 @@ export const api = {
         framework: input.framework,
         git: input.git,
         port: input.port || 3000,
+        replicas: input.replicas || 1,
         env: input.env || [],
         resourceLimits: input.resourceLimits || {
           cpuLimitCores: 1.0,
@@ -392,7 +414,11 @@ export const api = {
     });
 
     if (!json.data) {
-      throw new ApiRequestError('Control plane did not return the new deployment', 502, 'INVALID_RESPONSE');
+      throw new ApiRequestError(
+        'Control plane did not return the new deployment',
+        502,
+        'INVALID_RESPONSE'
+      );
     }
     return json.data;
   },
@@ -457,6 +483,41 @@ export const api = {
   },
 
   /**
+   * Simulates a worker node dropout / power failure to demonstrate autonomous self-healing.
+   */
+  async simulateWorkerDropout(workerId: string): Promise<SweepResult> {
+    const json = await requestJson<{ sweep: SweepResult }>(
+      `${API_URL}/api/v1/workers/${encodeURIComponent(workerId)}/simulate-dropout`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    return (
+      json.data?.sweep || {
+        offlineWorkers: [workerId],
+        rescheduledDeployments: [],
+        failedDeployments: [],
+        timestamp: new Date().toISOString(),
+      }
+    );
+  },
+
+  /**
+   * Restores a previously simulated offline worker back to the cluster.
+   */
+  async simulateWorkerReconnect(workerId: string): Promise<boolean> {
+    await requestJson<unknown>(
+      `${API_URL}/api/v1/workers/${encodeURIComponent(workerId)}/simulate-reconnect`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    return true;
+  },
+
+  /**
    * Relocates a deployment to a designated target worker node.
    * Performs capacity pre-flight validation on the control plane.
    */
@@ -484,7 +545,12 @@ export const api = {
         }
       }
     } catch (err) {
-      if (err instanceof Error && !err.message.includes('fetch') && !err.message.includes('Failed query') && !err.message.includes('DATABASE_ERROR')) {
+      if (
+        err instanceof Error &&
+        !err.message.includes('fetch') &&
+        !err.message.includes('Failed query') &&
+        !err.message.includes('DATABASE_ERROR')
+      ) {
         throw err;
       }
     }
@@ -598,6 +664,135 @@ export const api = {
       workerStats,
       dryRun,
       executedAt: new Date().toISOString(),
+    };
+  },
+
+  /**
+   * Fetches real-time cloud cost arbitrage and FinOps metrics.
+   * If the control plane or database is offline, dynamically derives
+   * the exact benchmarks from active local workers and deployments.
+   */
+  async getFinOpsSummary(): Promise<FinOpsSummary> {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/finops/summary`, {
+        headers: this.getAuthHeaders(),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          return json.data as FinOpsSummary;
+        }
+      }
+    } catch {
+      // offline fallback
+    }
+
+    // Dynamic fallback calculation using live worker & deployment state
+    const workers = await this.getWorkers();
+    const deployments = await this.getDeployments();
+
+    const activeWorkers = workers.filter((w) => w.state !== 'offline');
+    const runningDeployments = deployments.filter(
+      (d) => d.state === 'running' || d.state === 'queued'
+    );
+    const readyRoutes = deployments.filter(
+      (d) =>
+        d.state === 'running' &&
+        d.routingStatus === 'ready' &&
+        typeof d.publicUrl === 'string' &&
+        d.publicUrl.startsWith('https://')
+    );
+
+    const nodeCount = activeWorkers.length;
+    const totalVcpus = activeWorkers.reduce(
+      (acc, w) => acc + (w.resources?.cpuCount ?? 4),
+      0
+    );
+    const totalMemoryMb = activeWorkers.reduce(
+      (acc, w) => acc + (w.resources?.totalMemoryMb ?? 8192),
+      0
+    );
+    const totalMemoryGb = Number((totalMemoryMb / 1024).toFixed(1));
+    const activeWorkloadsCount = runningDeployments.length;
+    const readyRoutesCount = readyRoutes.length;
+
+    if (nodeCount === 0) {
+      return {
+        nodeCount: 0,
+        totalVcpus: 0,
+        totalMemoryMb: 0,
+        totalMemoryGb: 0,
+        activeWorkloadsCount: 0,
+        readyRoutesCount: 0,
+        awsInstanceEquivalent: 'No active nodes',
+        awsComputeCostMonthly: 0,
+        awsNetworkingCostMonthly: 0,
+        awsTotalCostMonthly: 0,
+        awsTotalCostAnnual: 0,
+        cwcCostMonthly: 0,
+        cwcCostAnnual: 0,
+        monthlySavings: 0,
+        annualSavings: 0,
+        savingsRatePerMinute: 0,
+        savingsRatePerSecond: 0,
+        carbonOffsetKgMonthly: 0,
+        treesEquivalentAnnual: 0,
+        calculatedAt: new Date().toISOString(),
+      };
+    }
+
+    const computeCost = Number((totalVcpus * 12.5 + totalMemoryGb * 4.25).toFixed(2));
+    const networkingCost = Number(
+      (16.2 + readyRoutesCount * 7.2 + Math.max(readyRoutesCount, 1) * 4.5).toFixed(2)
+    );
+    const awsTotalCostMonthly = Number((computeCost + networkingCost).toFixed(2));
+    const awsTotalCostAnnual = Number((awsTotalCostMonthly * 12).toFixed(2));
+
+    let awsInstanceEquivalent = '1x AWS t4g.medium (2 vCPU, 4 GB)';
+    if (totalMemoryGb >= 32) {
+      const xlargeCount = Math.floor(totalMemoryGb / 16);
+      const rem = totalMemoryGb % 16;
+      awsInstanceEquivalent =
+        rem >= 6
+          ? `${xlargeCount}x AWS t4g.xlarge + 1x t4g.large`
+          : `${xlargeCount}x AWS t4g.xlarge (${totalVcpus} vCPU, ${totalMemoryGb} GB)`;
+    } else if (totalMemoryGb >= 20) {
+      awsInstanceEquivalent = '1x AWS t4g.2xlarge (8 vCPU, 32 GB)';
+    } else if (totalMemoryGb >= 14) {
+      awsInstanceEquivalent = '1x AWS t4g.xlarge (4 vCPU, 16 GB)';
+    } else if (totalMemoryGb >= 6) {
+      awsInstanceEquivalent = '1x AWS t4g.large (2 vCPU, 8 GB)';
+    }
+
+    const monthlySavings = awsTotalCostMonthly;
+    const annualSavings = awsTotalCostAnnual;
+    const secondsInMonth = 30 * 24 * 3600;
+    const savingsRatePerSecond = Number((monthlySavings / secondsInMonth).toFixed(6));
+    const savingsRatePerMinute = Number((savingsRatePerSecond * 60).toFixed(4));
+    const carbonOffsetKgMonthly = Number((totalMemoryGb * 0.507).toFixed(1));
+    const treesEquivalentAnnual = Math.max(1, Math.round((carbonOffsetKgMonthly * 12) / 21));
+
+    return {
+      nodeCount,
+      totalVcpus,
+      totalMemoryMb,
+      totalMemoryGb,
+      activeWorkloadsCount,
+      readyRoutesCount,
+      awsInstanceEquivalent,
+      awsComputeCostMonthly: computeCost,
+      awsNetworkingCostMonthly: networkingCost,
+      awsTotalCostMonthly,
+      awsTotalCostAnnual,
+      cwcCostMonthly: 0,
+      cwcCostAnnual: 0,
+      monthlySavings,
+      annualSavings,
+      savingsRatePerMinute,
+      savingsRatePerSecond,
+      carbonOffsetKgMonthly,
+      treesEquivalentAnnual,
+      calculatedAt: new Date().toISOString(),
     };
   },
 };
