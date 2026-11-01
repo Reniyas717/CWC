@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Workflow,
   Scale,
+BarChart3,
   Laptop,
   LogOut,
   Coins,
@@ -34,6 +35,7 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     group: 'Platform',
     items: [
       { label: 'Dashboard', path: '/', icon: LayoutDashboard },
+      { label: 'Cluster Analytics', path: '/analytics', icon: BarChart3 },
       { label: 'FinOps Arbitrage', path: '/finops', icon: Coins },
     ],
   },
@@ -96,6 +98,8 @@ export function AppLayout({ onSignOut }: { onSignOut: () => void }) {
     switch (location.pathname) {
       case '/':
         return 'Overview';
+      case '/analytics':
+        return 'Cluster Analytics Fabric';
       case '/finops':
         return 'FinOps & Cost Arbitrage';
       case '/apps':

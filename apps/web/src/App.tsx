@@ -10,6 +10,7 @@ import { EqualizerPage } from './pages/EqualizerPage';
 import { FinOpsPage } from './pages/FinOpsPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SignInPage } from './pages/SignInPage';
 import { ContributeLaptopPage } from './pages/ContributeLaptopPage';
 import { MyWorkerPage } from './pages/MyWorkerPage';
@@ -49,6 +50,7 @@ export function App() {
             <Route path="workers" element={<WorkersPage />} />
             <Route path="deployments" element={<DeploymentsPage />} />
             <Route path="equalizer" element={<EqualizerPage />} />
+            <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="finops" element={<FinOpsPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="settings" element={<SettingsPage />} />

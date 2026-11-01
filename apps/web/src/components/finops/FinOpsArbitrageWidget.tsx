@@ -26,6 +26,7 @@ export function FinOpsArbitrageWidget() {
   });
 
   // Interactive Fleet Scaling Simulation State (1 to 50 nodes)
+
   const [simulatedNodes, setSimulatedNodes] = React.useState<number>(12);
   const [sessionStartTime] = React.useState<number>(() => Date.now());
   const [sessionSaved, setSessionSaved] = React.useState<number>(0);

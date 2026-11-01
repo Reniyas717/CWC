@@ -668,6 +668,39 @@ export const api = {
   },
 
   /**
+   * Attempts to repair or re-publish an ingress route for a deployment on Caddy/Cloudflare.
+   */
+  async repairDeploymentRoute(deploymentId: string): Promise<Deployment> {
+    const res = await fetch(
+      `${API_URL}/api/v1/deployments/${encodeURIComponent(deploymentId)}/repair-route`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json?.error?.message || 'Route repair failed');
+    }
+    return json.data;
+  },
+
+  /**
+   * Triggers an immediate cluster-wide gateway route reconciliation.
+   */
+  async reconcileGatewayIngress(): Promise<{ desiredRoutes: number; publishedRoutes: number }> {
+    const res = await fetch(`${API_URL}/api/v1/deployments/reconcile-ingress`, {
+      method: 'POST',
+      headers: this.getAuthHeaders(),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      throw new Error(json?.error?.message || 'Gateway reconciliation failed');
+    }
+    return json.data;
+  },
+
+  /**
    * Fetches real-time cloud cost arbitrage and FinOps metrics.
    * If the control plane or database is offline, dynamically derives
    * the exact benchmarks from active local workers and deployments.

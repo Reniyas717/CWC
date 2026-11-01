@@ -22,6 +22,7 @@ import {
 import { selectBestWorker, evaluateWorkerEligibility } from '../services/scheduler.js';
 import { gatewayClient } from '../services/gateway-client.js';
 import { removeDeploymentRoute } from '../services/route-cleanup.js';
+import { reconcileGatewayRoutes } from '../services/gateway-reconciliation.js';
 
 export const deploymentsRouter: Router = Router();
 
@@ -768,6 +769,139 @@ deploymentsRouter.delete('/:id', requireAdmin, async (req: Request, res: Respons
       error: {
         code: 'DELETE_FAILED',
         message: 'Failed to delete deployment',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/deployments/reconcile-ingress
+ * Triggers an immediate cluster-wide gateway route reconciliation for all running workloads.
+ */
+deploymentsRouter.post('/reconcile-ingress', optionalAdmin, async (_req: Request, res: Response) => {
+  try {
+    const result = await reconcileGatewayRoutes();
+    res.status(200).json({
+      success: true,
+      message: 'Gateway routes reconciled with cluster state',
+      data: result,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'RECONCILIATION_FAILED',
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/deployments/:id/repair-route
+ * Attempts to re-publish or repair an ingress route for a running deployment on Caddy & Cloudflare.
+ */
+deploymentsRouter.post('/:id/repair-route', optionalAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const existing = await db.select().from(deployments).where(eq(deployments.id, id));
+    if (existing.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: `Deployment '${id}' not found` },
+      });
+      return;
+    }
+    const dep = existing[0];
+    if (dep.state !== 'running' || !dep.workerId || !dep.assignedPort) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'INVALID_STATE',
+          message: `Cannot repair route: deployment is ${dep.state} (worker: ${dep.workerId ?? 'none'}, port: ${dep.assignedPort ?? 'none'})`,
+        },
+      });
+      return;
+    }
+
+    const workerRows = await db.select().from(workerNodes).where(eq(workerNodes.id, dep.workerId));
+    if (workerRows.length === 0) {
+      res.status(400).json({
+        success: false,
+        error: { code: 'WORKER_NOT_FOUND', message: `Worker '${dep.workerId}' not found` },
+      });
+      return;
+    }
+    const worker = workerRows[0];
+
+    // Attempt direct publication via gateway
+    const published = await gatewayClient.publishRoute(
+      dep.id,
+      worker.ipAddress,
+      dep.assignedPort,
+      '/',
+      4,
+      1000,
+      dep.attemptId ?? undefined
+    );
+
+    if (published && published.publicUrl) {
+      await db
+        .update(deployments)
+        .set({
+          publicUrl: published.publicUrl,
+          routingStatus: 'ready',
+          routingError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(deployments.id, dep.id));
+
+      await db.insert(deploymentEvents).values({
+        deploymentId: dep.id,
+        eventType: 'ROUTE_RESTORED',
+        details: `Public ingress route restored: ${published.publicUrl}`,
+        timestamp: new Date(),
+      });
+
+      const updated = await db.select().from(deployments).where(eq(deployments.id, dep.id));
+      res.status(200).json({
+        success: true,
+        message: 'Route restored successfully',
+        data: mapDeploymentRow(updated[0]),
+      });
+      return;
+    }
+
+    // If direct publication didn't yield a ready publicUrl, run reconciliation
+    await reconcileGatewayRoutes();
+    const refreshed = await db.select().from(deployments).where(eq(deployments.id, dep.id));
+    const resultDep = mapDeploymentRow(refreshed[0]);
+
+    if (resultDep.routingStatus === 'ready') {
+      res.status(200).json({
+        success: true,
+        message: 'Route restored through gateway reconciliation',
+        data: resultDep,
+      });
+    } else {
+      res.status(502).json({
+        success: false,
+        error: {
+          code: 'GATEWAY_UNAVAILABLE',
+          message:
+            'Gateway service is unreachable or still starting Cloudflare Quick Tunnel. Ensure gateway process is running (node --env-file=.env deploy/gateway/gateway.mjs).',
+          details: resultDep.routingError,
+        },
+        data: resultDep,
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'ROUTE_REPAIR_FAILED',
+        message: 'Failed to repair ingress route',
         details: error instanceof Error ? error.message : String(error),
       },
     });
