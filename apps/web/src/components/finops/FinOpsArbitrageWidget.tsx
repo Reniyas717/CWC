@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  DollarSign,
+  IndianRupee,
   Leaf,
   Cpu,
   Zap,
@@ -16,6 +16,7 @@ import {
 import { api, FinOpsSummary } from '@/services/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { formatUsdAsInr, USD_TO_INR_RATE } from '@/lib/currency';
 
 export function FinOpsArbitrageWidget() {
   const { data: summary, isLoading } = useQuery<FinOpsSummary>({
@@ -125,7 +126,7 @@ export function FinOpsArbitrageWidget() {
               </span>
             </div>
             <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
-              +${sessionSaved.toFixed(5)}
+              +{formatUsdAsInr(sessionSaved, 4)}
             </span>
           </div>
         </div>
@@ -140,7 +141,7 @@ export function FinOpsArbitrageWidget() {
               Zero AWS/Cloud Accounts Needed • 100% Local Peer Workstations:
             </span>
             <p className="text-[11px] leading-relaxed">
-              Your containers run purely on your own developer laptops and workstations with Docker. The figures below benchmark your idle hardware against public hyperscaler pricing cards (AWS EC2 at $12.50/vCPU and $4.25/GB RAM) to prove how much capital your team saves by not purchasing commercial cloud instances.
+              Your containers run purely on your own developer laptops and workstations with Docker. The figures below benchmark your idle hardware against public hyperscaler pricing cards (AWS EC2 at {formatUsdAsInr(12.5)}/vCPU-month and {formatUsdAsInr(4.25)}/GB RAM-month) to show the estimated cost avoided by using your own machines. INR conversion uses an approximate rate of ₹{USD_TO_INR_RATE.toFixed(2)} per USD.
             </p>
           </div>
         </div>
@@ -151,14 +152,14 @@ export function FinOpsArbitrageWidget() {
           <div className="p-4 rounded-xl bg-card border border-border/80 space-y-1">
             <div className="flex items-center justify-between text-muted-foreground">
               <span className="text-xs font-medium">Monthly Arbitrage</span>
-              <DollarSign className="h-4 w-4 text-emerald-500" />
+              <IndianRupee className="h-4 w-4 text-emerald-500" />
             </div>
             <div className="text-2xl font-bold font-mono tracking-tight text-emerald-600 dark:text-emerald-400">
-              ${monthlySavings.toFixed(2)}
+              {formatUsdAsInr(monthlySavings)}
               <span className="text-xs font-normal text-muted-foreground font-sans">/mo</span>
             </div>
             <div className="text-[11px] text-muted-foreground font-mono">
-              Annual: <span className="font-semibold text-foreground">${annualSavings.toFixed(2)}/yr</span>
+              Annual: <span className="font-semibold text-foreground">{formatUsdAsInr(annualSavings)}/yr</span>
             </div>
           </div>
 
@@ -224,19 +225,19 @@ export function FinOpsArbitrageWidget() {
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">EC2 On-Demand Compute ({totalVcpus} vCPU, {totalMemoryGb}GB RAM)</span>
-                <span className="font-mono font-medium text-foreground">${awsComputeCost.toFixed(2)}/mo</span>
+                <span className="font-mono font-medium text-foreground">{formatUsdAsInr(awsComputeCost)}/mo</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">AWS Application Load Balancer + LCUs</span>
-                <span className="font-mono font-medium text-foreground">${(awsNetworkingCost * 0.65).toFixed(2)}/mo</span>
+                <span className="font-mono font-medium text-foreground">{formatUsdAsInr(awsNetworkingCost * 0.65)}/mo</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Cloud Egress & Data Transfer Fees</span>
-                <span className="font-mono font-medium text-foreground">${(awsNetworkingCost * 0.35).toFixed(2)}/mo</span>
+                <span className="font-mono font-medium text-foreground">{formatUsdAsInr(awsNetworkingCost * 0.35)}/mo</span>
               </div>
               <div className="pt-2 border-t border-destructive/15 flex items-center justify-between font-semibold">
                 <span className="text-foreground">Hypothetical AWS Monthly Invoice</span>
-                <span className="font-mono text-sm text-destructive">${awsTotalMonthly.toFixed(2)}/mo</span>
+                <span className="font-mono text-sm text-destructive">{formatUsdAsInr(awsTotalMonthly)}/mo</span>
               </div>
             </div>
           </div>
@@ -251,26 +252,26 @@ export function FinOpsArbitrageWidget() {
                 </span>
               </div>
               <Badge variant="success" className="text-[10px]">
-                Actual Bill: $0.00
+                Actual Bill: {formatUsdAsInr(0)}
               </Badge>
             </div>
 
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Repurposed Workstation Silicon (Docker)</span>
-                <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">$0.00</span>
+                <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">{formatUsdAsInr(0)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Direct Peer-to-Peer Mesh (Tailscale WireGuard)</span>
-                <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">$0.00</span>
+                <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">{formatUsdAsInr(0)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-muted-foreground">Zero-Cost Edge Gateway & Tunnels (Caddy)</span>
-                <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">$0.00</span>
+                <span className="font-mono font-medium text-emerald-600 dark:text-emerald-400">{formatUsdAsInr(0)}</span>
               </div>
               <div className="pt-2 border-t border-emerald-500/15 flex items-center justify-between font-semibold">
                 <span className="text-foreground">Your Actual Infrastructure Outlay</span>
-                <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400">$0.00 / mo</span>
+                <span className="font-mono text-sm text-emerald-600 dark:text-emerald-400">{formatUsdAsInr(0)} / mo</span>
               </div>
             </div>
           </div>
@@ -328,13 +329,13 @@ export function FinOpsArbitrageWidget() {
             <div className="p-2.5 rounded-lg bg-card/60 border border-border/60 text-center">
               <div className="text-[10px] text-muted-foreground">Monthly Cloud Spend Avoided</div>
               <div className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                ${simMonthlyTotal.toFixed(2)}/mo
+                {formatUsdAsInr(simMonthlyTotal)}/mo
               </div>
             </div>
             <div className="p-2.5 rounded-lg bg-card/60 border border-border/60 text-center">
               <div className="text-[10px] text-muted-foreground">Annual Cloud Budget Saved</div>
               <div className="font-mono text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                ${simAnnualTotal.toFixed(2)}/yr
+                {formatUsdAsInr(simAnnualTotal)}/yr
               </div>
             </div>
             <div className="p-2.5 rounded-lg bg-card/60 border border-border/60 text-center">
@@ -350,7 +351,7 @@ export function FinOpsArbitrageWidget() {
             <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <p>
               <strong className="text-foreground">CTO & Pitch Takeaway:</strong> An engineering team of {simulatedNodes} developers running tests, microservices, and preview environments on their idle workstations prevents{' '}
-              <strong className="text-foreground font-mono">${simAnnualTotal.toLocaleString()}</strong> in unnecessary AWS hyperscaler invoices every year while eliminating {simAnnualCarbon} kg of data center carbon emissions.
+              <strong className="text-foreground font-mono">{formatUsdAsInr(simAnnualTotal)}</strong> in estimated AWS hyperscaler invoices every year while eliminating {simAnnualCarbon} kg of data center carbon emissions.
             </p>
           </div>
         </div>

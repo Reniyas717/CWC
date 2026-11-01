@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Deployment, WorkerNode } from '@cloud-without-clouds/shared';
+import { formatUsdAsInr } from '@/lib/currency';
 
 export function FinOpsPage() {
   const { refetch, isRefetching } = useQuery<FinOpsSummary>({
@@ -49,7 +50,7 @@ export function FinOpsPage() {
               Cloud Cost Arbitrage & FinOps
             </h1>
             <Badge variant="success" className="text-[10px] tracking-wide uppercase font-semibold">
-              $0.00 Mesh Bill
+              {formatUsdAsInr(0)} Mesh Bill
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -146,11 +147,11 @@ export function FinOpsPage() {
                           <div className="text-xs text-muted-foreground">
                             Hyperscaler Retail Benchmark:{' '}
                             <span className="line-through text-destructive font-mono font-medium">
-                              ${awsContainerMonthly.toFixed(2)}/mo
+                              {formatUsdAsInr(awsContainerMonthly)}/mo
                             </span>
                           </div>
                           <div className="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                            Local Workstation: $0.00 (100% saved)
+                            Local Workstation: {formatUsdAsInr(0)} (100% saved)
                           </div>
                         </div>
                       </div>
