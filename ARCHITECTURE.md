@@ -524,6 +524,17 @@ the control plane stores that value instead of inferring an upstream from the
 HTTP transport peer. Missing or non-Tailscale addresses are rejected, and a
 worker without a discoverable Tailscale address fails closed before registering.
 
+An authenticated `POST /api/v1/workers/heartbeat` also enrolls any previously
+unknown `workerId`, regardless of its source address. Heartbeat enrollment uses
+the ID for the initial name and hostname, records the observed transport peer
+(including IPv4, IPv6, or loopback), and starts with port 5001 and a one-workload
+limit. `WorkerNode.ipAddress` therefore accepts any IP address. Subsequent
+heartbeats update telemetry without rejecting changes in source IP or replacing
+an address supplied by registration. Idle or busy nodes with sufficient resources
+and a fresh heartbeat become scheduler candidates. Worker token authentication
+and heartbeat payload validation still apply. Container publishing continues to
+require a usable Tailscale interface on the worker.
+
 #### 1. Worker Task Polling (MVP Dispatch Mechanism)
 - **Route:** `GET /api/v1/workers/:id/tasks`
 - **Headers:** `Authorization: Bearer <WORKER_SECRET_TOKEN>`

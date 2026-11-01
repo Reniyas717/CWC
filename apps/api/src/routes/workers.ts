@@ -439,20 +439,8 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
   const now = new Date();
 
   try {
-    const peerAddress = getTailscalePeerAddress(req);
-    if (!peerAddress) {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: 'TAILSCALE_ADDRESS_REQUIRED',
-          message: 'Heartbeat requests must come from a Tailscale IPv4 address',
-        },
-      });
-      return;
-    }
-
-    // First heartbeat can enroll a node when it arrives over Tailscale and
-    // authenticates with the configured worker secret. Registration remains
+    const peerAddress = (req.ip ?? req.socket.remoteAddress ?? '127.0.0.1').replace(/^::ffff:/, '');
+    // Any authenticated first heartbeat can enroll a node. Registration remains
     // the richer path for supplying a friendly name, port, and resource caps.
     const existing = await db
       .select({ id: workerNodes.id, ipAddress: workerNodes.ipAddress })
@@ -478,17 +466,6 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
         registeredAt: now,
         lastHeartbeatAt: now,
       }).onConflictDoNothing();
-    }
-
-    // Re-read after insert to handle concurrent first heartbeats safely: a
-    // conflicting insert must not let a different Tailscale peer claim an ID.
-    const persistedWorker = await db
-      .select({ ipAddress: workerNodes.ipAddress })
-      .from(workerNodes)
-      .where(eq(workerNodes.id, payload.workerId));
-    if (persistedWorker.length === 0 || peerAddress !== persistedWorker[0].ipAddress) {
-      rejectWorkerIdentityMismatch(res, payload.workerId);
-      return;
     }
 
     // Update telemetry in PostgreSQL

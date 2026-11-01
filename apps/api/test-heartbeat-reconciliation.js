@@ -142,6 +142,40 @@ async function heartbeat(activeWorkloadIds) {
 
 async function main() {
   await waitForDatabase();
+  const enrollmentId = `${workerId}-first-heartbeat`;
+  try {
+    const payload = {
+      workerId: enrollmentId,
+      state: 'draining',
+      resources: {
+        cpuCount: 4, cpuUsagePercent: 5, totalMemoryMb: 8192,
+        freeMemoryMb: 4096, usedMemoryMb: 4096, activeContainers: 0,
+      },
+      activeWorkloadIds: [],
+      timestamp: new Date().toISOString(),
+    };
+    const rejected = await fetch(`${base}/api/v1/workers/heartbeat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    assert(rejected.status === 401, 'first heartbeat still requires worker authentication');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetch(`${base}/api/v1/workers/heartbeat`, {
+        method: 'POST', headers: workerHeaders, body: JSON.stringify(payload),
+      });
+      assert(response.status === 200, 'unregistered local worker can enroll and repeat its heartbeat');
+    }
+    const enrolled = await pool.query(
+      'SELECT ip_address, state FROM worker_nodes WHERE id = $1', [enrollmentId]
+    );
+    assert(enrolled.rows.length === 1, 'heartbeat creates exactly one worker row');
+    assert(
+      ['127.0.0.1', '::1'].includes(enrolled.rows[0]?.ip_address),
+      'heartbeat enrollment accepts a non-Tailscale loopback source'
+    );
+  } finally {
+    await pool.query('DELETE FROM worker_nodes WHERE id = $1', [enrollmentId]);
+  }
   await registerWorker();
 
   const staleId = await createDeployment('Heartbeat stale workload');

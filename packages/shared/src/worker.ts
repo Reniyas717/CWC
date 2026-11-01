@@ -40,7 +40,8 @@ export const WorkerNodeSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   hostname: z.string(),
-  ipAddress: TailscaleIpv4Schema,
+  // Heartbeat enrollment records the observed peer, including local or proxied workers.
+  ipAddress: z.string().ip(),
   port: z.number().int(),
   state: WorkerStateSchema,
   resources: WorkerResourcesSchema,
