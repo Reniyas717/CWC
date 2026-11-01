@@ -21,6 +21,7 @@
     "test:task-claim": "node test-task-claim.js",
     "test:result-ownership": "node test-result-ownership.js",
     "test:worker-recovery": "node test-worker-recovery.js",
+    "test:finops": "node test-finops.js",
     "test:all": "node test-auth.js && node test-phase4.js && node test-phase5.js && node test-phase6.js && node test-worker-network.js && node test-task-claim.js && node test-result-ownership.js && node test-worker-recovery.js"
   },
   "dependencies": {

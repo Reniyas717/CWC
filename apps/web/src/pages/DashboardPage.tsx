@@ -21,11 +21,13 @@ import {
   Activity,
   CheckCircle2,
   Scale,
+  Coins,
 } from 'lucide-react';
 import { Deployment } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown } from '@/services/api';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { FinOpsArbitrageWidget } from '@/components/finops/FinOpsArbitrageWidget';
 import { DataError } from '@/components/ui/data-error';
 
 const topology = [
@@ -153,6 +155,15 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="flex items-center gap-2.5 shrink-0">
+          <NavLink to="/finops">
+            <Button
+              variant="outline"
+              className="h-9 px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
+            >
+              <Coins className="h-3.5 w-3.5" />
+              <span>FinOps Arbitrage</span>
+            </Button>
+          </NavLink>
           <NavLink to="/equalizer">
             <Button
               variant="outline"
@@ -220,6 +231,9 @@ export function DashboardPage() {
           );
         })}
       </div>
+
+      {/* Cloud Cost Arbitrage & FinOps Dashboard Engine */}
+      <FinOpsArbitrageWidget />
 
       {/* Live Activity & Fleet Status Master Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
