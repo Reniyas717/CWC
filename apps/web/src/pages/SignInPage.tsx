@@ -1,4 +1,3 @@
-import * as React from 'react';
 import { Cloud, Github, ShieldCheck, CircleAlert } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
