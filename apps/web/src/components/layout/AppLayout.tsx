@@ -16,6 +16,7 @@ import {
   Workflow,
   Scale,
   BarChart3,
+  Coins,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { api } from '@/services/api';
@@ -33,6 +34,7 @@ const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
     items: [
       { label: 'Dashboard', path: '/', icon: LayoutDashboard },
       { label: 'Cluster Analytics', path: '/analytics', icon: BarChart3 },
+      { label: 'FinOps Arbitrage', path: '/finops', icon: Coins },
     ],
   },
   {
@@ -96,6 +98,8 @@ export function AppLayout() {
         return 'Overview';
       case '/analytics':
         return 'Cluster Analytics Fabric';
+      case '/finops':
+        return 'FinOps & Cost Arbitrage';
       case '/apps':
         return 'Applications';
       case '/workers':

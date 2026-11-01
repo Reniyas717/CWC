@@ -4,6 +4,7 @@ import { workersRouter } from './workers.js';
 import { applicationsRouter } from './applications.js';
 import { deploymentsRouter } from './deployments.js';
 import { internalDeploymentsRouter } from './internal-deployments.js';
+import { finopsRouter } from './finops.js';
 
 export const apiRouter: Router = Router();
 
@@ -15,3 +16,4 @@ apiRouter.use('/api/v1/workers', workersRouter);
 apiRouter.use('/api/v1/applications', applicationsRouter);
 apiRouter.use('/api/v1/deployments', deploymentsRouter);
 apiRouter.use('/api/v1/internal/deployments', internalDeploymentsRouter);
+apiRouter.use('/api/v1/finops', finopsRouter);

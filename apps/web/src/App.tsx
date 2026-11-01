@@ -6,6 +6,7 @@ import { ApplicationsPage } from './pages/ApplicationsPage';
 import { WorkersPage } from './pages/WorkersPage';
 import { DeploymentsPage } from './pages/DeploymentsPage';
 import { EqualizerPage } from './pages/EqualizerPage';
+import { FinOpsPage } from './pages/FinOpsPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
@@ -31,6 +32,7 @@ export function App() {
             <Route path="deployments" element={<DeploymentsPage />} />
             <Route path="equalizer" element={<EqualizerPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="finops" element={<FinOpsPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
