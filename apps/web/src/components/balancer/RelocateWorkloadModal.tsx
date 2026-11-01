@@ -1,11 +1,6 @@
 import * as React from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  ArrowLeftRight,
-  X,
-  AlertCircle,
-  Check,
-} from 'lucide-react';
+import { ArrowLeftRight, X, AlertCircle, Check } from 'lucide-react';
 import { Deployment, WorkerNode } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
@@ -199,8 +194,8 @@ export function RelocateWorkloadModal({
                       isSelected
                         ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
                         : isEligible
-                        ? 'border-border bg-card hover:bg-secondary/40 cursor-pointer'
-                        : 'border-border/40 bg-secondary/15 opacity-60 cursor-not-allowed'
+                          ? 'border-border bg-card hover:bg-secondary/40 cursor-pointer'
+                          : 'border-border/40 bg-secondary/15 opacity-60 cursor-not-allowed'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
@@ -260,7 +255,13 @@ export function RelocateWorkloadModal({
 
           {/* Modal Actions */}
           <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-            <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs cursor-pointer">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={onClose}
+              className="text-xs cursor-pointer"
+            >
               Cancel
             </Button>
             <Button

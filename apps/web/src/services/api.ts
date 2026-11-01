@@ -155,100 +155,13 @@ async function getApiErrorMessage(response: Response): Promise<string> {
   return `Control plane rejected the deployment request (HTTP ${response.status}).`;
 }
 
-// Initial realistic applications
-const INITIAL_APPLICATIONS: AppConfig[] = [
-  {
-    id: 'app-node-express-01',
-    name: 'Distributed Express API Gateway',
-    slug: 'express-api-gateway',
-    framework: 'nodejs',
-    git: {
-      repositoryUrl: 'https://github.com/cloud-without-clouds/demo-node-app.git',
-      branch: 'main',
-      rootDirectory: '/',
-      commitHash: 'f4b98c2',
-    },
-    port: 3000,
-    replicas: 2,
-    env: [
-      { key: 'NODE_ENV', value: 'production', isSecret: false },
-      { key: 'PORT', value: '3000', isSecret: false },
-    ],
-    resourceLimits: {
-      cpuLimitCores: 1.0,
-      memoryLimitMb: 512,
-    },
-    createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
-    updatedAt: new Date(Date.now() - 1200000).toISOString(),
-  },
-  {
-    id: 'app-vite-static-02',
-    name: 'Peer Mesh Status Dashboard',
-    slug: 'peer-mesh-status',
-    framework: 'static',
-    git: {
-      repositoryUrl: 'https://github.com/cloud-without-clouds/demo-static-web.git',
-      branch: 'main',
-      rootDirectory: '/',
-      commitHash: 'e7102ad',
-    },
-    port: 80,
-    replicas: 1,
-    env: [{ key: 'VITE_API_ENDPOINT', value: '/api/v1', isSecret: false }],
-    resourceLimits: {
-      cpuLimitCores: 0.5,
-      memoryLimitMb: 256,
-    },
-    createdAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-  },
-];
-
-const INITIAL_DEPLOYMENTS: Deployment[] = [
-  {
-    id: 'dep-018e3a2b',
-    applicationId: 'app-node-express-01',
-    version: 1,
-    gitCommitHash: 'f4b98c2',
-    gitBranch: 'main',
-    state: 'running',
-    workerId: 'worker-node-local-01',
-    containerId: 'cwc-cnt-a912f4b',
-    assignedPort: 20015,
-    publicUrl: 'https://express-api-gateway.trycloudflare.com',
-    routingStatus: 'ready',
-    createdAt: new Date(Date.now() - 1200000).toISOString(),
-    updatedAt: new Date(Date.now() - 1180000).toISOString(),
-    startedAt: new Date(Date.now() - 1195000).toISOString(),
-  },
-  {
-    id: 'dep-018e4b1c',
-    applicationId: 'app-vite-static-02',
-    version: 1,
-    gitCommitHash: 'e7102ad',
-    gitBranch: 'main',
-    state: 'running',
-    workerId: 'worker-node-laptop-02',
-    containerId: 'cwc-cnt-b823e5a',
-    assignedPort: 20016,
-    publicUrl: 'https://peer-mesh-status.trycloudflare.com',
-    routingStatus: 'ready',
-    createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
-    updatedAt: new Date(Date.now() - 3600000 * 2 + 15000).toISOString(),
-    startedAt: new Date(Date.now() - 3600000 * 2 + 10000).toISOString(),
-  },
-];
-
 function loadLocalApps(): AppConfig[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_APPS);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY_APPS, JSON.stringify(INITIAL_APPLICATIONS));
-      return INITIAL_APPLICATIONS;
-    }
+    if (!raw) return [];
     return JSON.parse(raw);
   } catch {
-    return INITIAL_APPLICATIONS;
+    return [];
   }
 }
 
@@ -263,13 +176,10 @@ function saveLocalApps(apps: AppConfig[]): void {
 function loadLocalDeployments(): Deployment[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_DEPS);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY_DEPS, JSON.stringify(INITIAL_DEPLOYMENTS));
-      return INITIAL_DEPLOYMENTS;
-    }
+    if (!raw) return [];
     return JSON.parse(raw);
   } catch {
-    return INITIAL_DEPLOYMENTS;
+    return [];
   }
 }
 
@@ -280,81 +190,6 @@ function saveLocalDeployments(deps: Deployment[]): void {
     console.warn('Failed to save deployments cache', err);
   }
 }
-
-const FALLBACK_WORKERS: WorkerNode[] = [
-  {
-    id: 'worker-node-local-01',
-    name: 'Workstation Alpha (MacBook Pro M3 Max)',
-    hostname: 'alpha-node.mesh.internal',
-    ipAddress: '100.64.0.1',
-    port: 4100,
-    state: 'idle',
-    resources: {
-      cpuCount: 8,
-      cpuUsagePercent: 14.5,
-      totalMemoryMb: 16384,
-      freeMemoryMb: 12288,
-      usedMemoryMb: 4096,
-      activeContainers: 1,
-    },
-    limits: {
-      maxConcurrentWorkloads: 6,
-      maxMemoryMb: 16384,
-      maxCpuCores: 8,
-    },
-    version: '0.1.0',
-    registeredAt: new Date(Date.now() - 3600000 * 24).toISOString(),
-    lastHeartbeatAt: new Date().toISOString(),
-  },
-  {
-    id: 'worker-node-laptop-02',
-    name: 'Workstation Beta (ThinkPad X1 Carbon)',
-    hostname: 'beta-node.mesh.internal',
-    ipAddress: '100.64.0.2',
-    port: 4100,
-    state: 'idle',
-    resources: {
-      cpuCount: 4,
-      cpuUsagePercent: 28.0,
-      totalMemoryMb: 8192,
-      freeMemoryMb: 5120,
-      usedMemoryMb: 3072,
-      activeContainers: 1,
-    },
-    limits: {
-      maxConcurrentWorkloads: 4,
-      maxMemoryMb: 8192,
-      maxCpuCores: 4,
-    },
-    version: '0.1.0',
-    registeredAt: new Date(Date.now() - 3600000 * 12).toISOString(),
-    lastHeartbeatAt: new Date().toISOString(),
-  },
-  {
-    id: 'worker-node-edge-03',
-    name: 'Edge Node Gamma (Dell XPS 15)',
-    hostname: 'gamma-node.mesh.internal',
-    ipAddress: '100.64.0.3',
-    port: 4100,
-    state: 'idle',
-    resources: {
-      cpuCount: 4,
-      cpuUsagePercent: 8.2,
-      totalMemoryMb: 4096,
-      freeMemoryMb: 3072,
-      usedMemoryMb: 1024,
-      activeContainers: 0,
-    },
-    limits: {
-      maxConcurrentWorkloads: 2,
-      maxMemoryMb: 4096,
-      maxCpuCores: 4,
-    },
-    version: '0.1.0',
-    registeredAt: new Date(Date.now() - 3600000 * 6).toISOString(),
-    lastHeartbeatAt: new Date().toISOString(),
-  },
-];
 
 function computeFallbackWorkerScores(
   workers: WorkerNode[],
@@ -410,13 +245,13 @@ export const api = {
       const json = await requestJson<AppConfig[]>(`${API_URL}/api/v1/applications`, {
         headers: this.getAuthHeaders(),
       });
-      if (Array.isArray(json.data) && json.data.length > 0) {
+      if (Array.isArray(json.data)) {
         return json.data;
       }
     } catch (err) {
-      console.warn('[API] getApplications fallback:', err);
+      console.warn('[API] getApplications error:', err);
     }
-    return loadLocalApps();
+    return [];
   },
 
   /**
@@ -447,6 +282,7 @@ export const api = {
         framework: input.framework,
         git: input.git,
         port: input.port || 3000,
+        replicas: input.replicas || 1,
         env: input.env || [],
         resourceLimits: input.resourceLimits || {
           cpuLimitCores: 1.0,
@@ -511,14 +347,13 @@ export const api = {
         ? `${API_URL}/api/v1/deployments?applicationId=${encodeURIComponent(applicationId)}`
         : `${API_URL}/api/v1/deployments`;
       const json = await requestJson<Deployment[]>(url, { headers: this.getAuthHeaders() });
-      if (Array.isArray(json.data) && json.data.length > 0) {
+      if (Array.isArray(json.data)) {
         return json.data;
       }
     } catch (err) {
-      console.warn('[API] getDeployments fallback:', err);
+      console.warn('[API] getDeployments error:', err);
     }
-    const local = loadLocalDeployments();
-    return applicationId ? local.filter((d) => d.applicationId === applicationId) : local;
+    return [];
   },
 
   /**
@@ -580,7 +415,11 @@ export const api = {
     });
 
     if (!json.data) {
-      throw new ApiRequestError('Control plane did not return the new deployment', 502, 'INVALID_RESPONSE');
+      throw new ApiRequestError(
+        'Control plane did not return the new deployment',
+        502,
+        'INVALID_RESPONSE'
+      );
     }
     return json.data;
   },
@@ -593,13 +432,13 @@ export const api = {
       const json = await requestJson<WorkerNode[]>(`${API_URL}/api/v1/workers`, {
         headers: this.getAuthHeaders(),
       });
-      if (Array.isArray(json.data) && json.data.length > 0) {
+      if (Array.isArray(json.data)) {
         return json.data;
       }
     } catch (err) {
-      console.warn('[API] getWorkers fallback:', err);
+      console.warn('[API] getWorkers error:', err);
     }
-    return FALLBACK_WORKERS;
+    return [];
   },
 
   /**
@@ -645,6 +484,41 @@ export const api = {
   },
 
   /**
+   * Simulates a worker node dropout / power failure to demonstrate autonomous self-healing.
+   */
+  async simulateWorkerDropout(workerId: string): Promise<SweepResult> {
+    const json = await requestJson<{ sweep: SweepResult }>(
+      `${API_URL}/api/v1/workers/${encodeURIComponent(workerId)}/simulate-dropout`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    return (
+      json.data?.sweep || {
+        offlineWorkers: [workerId],
+        rescheduledDeployments: [],
+        failedDeployments: [],
+        timestamp: new Date().toISOString(),
+      }
+    );
+  },
+
+  /**
+   * Restores a previously simulated offline worker back to the cluster.
+   */
+  async simulateWorkerReconnect(workerId: string): Promise<boolean> {
+    await requestJson<unknown>(
+      `${API_URL}/api/v1/workers/${encodeURIComponent(workerId)}/simulate-reconnect`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    return true;
+  },
+
+  /**
    * Relocates a deployment to a designated target worker node.
    * Performs capacity pre-flight validation on the control plane.
    */
@@ -671,7 +545,12 @@ export const api = {
         }
       }
     } catch (err) {
-      if (err instanceof Error && !err.message.includes('fetch') && !err.message.includes('Failed query') && !err.message.includes('DATABASE_ERROR')) {
+      if (
+        err instanceof Error &&
+        !err.message.includes('fetch') &&
+        !err.message.includes('Failed query') &&
+        !err.message.includes('DATABASE_ERROR')
+      ) {
         throw err;
       }
     }

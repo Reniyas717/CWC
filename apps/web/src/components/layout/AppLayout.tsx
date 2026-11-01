@@ -147,7 +147,9 @@ export function AppLayout() {
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
           <span
             className={`text-[9px] font-mono uppercase tracking-wider ${
-              isActive ? 'text-sidebar-primary-foreground' : 'text-emerald-600 dark:text-emerald-400'
+              isActive
+                ? 'text-sidebar-primary-foreground'
+                : 'text-emerald-600 dark:text-emerald-400'
             }`}
           >
             Live
@@ -325,9 +327,7 @@ export function AppLayout() {
               <div className="h-7 w-7 rounded-md bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center font-bold">
                 <Cloud className="h-4 w-4" />
               </div>
-              <span className="font-semibold text-sm text-foreground">
-                Cloud Without Clouds
-              </span>
+              <span className="font-semibold text-sm text-foreground">Cloud Without Clouds</span>
             </div>
             <button
               type="button"
@@ -373,7 +373,9 @@ export function AppLayout() {
 
           <div className="p-4 border-t border-sidebar-border text-xs text-muted-foreground font-mono">
             <div>Peer Mesh Fabric</div>
-            <div className="text-[10px] text-muted-foreground/70 mt-0.5">Control Plane API :4000</div>
+            <div className="text-[10px] text-muted-foreground/70 mt-0.5">
+              Control Plane API :4000
+            </div>
           </div>
         </aside>
 

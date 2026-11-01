@@ -17,6 +17,8 @@ import {
   ArrowRight,
   Search,
   X,
+  Zap,
+  AlertTriangle,
 } from 'lucide-react';
 import { WorkerNode } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown, SweepResult } from '@/services/api';
@@ -26,6 +28,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
+import { FailoverSimulatorModal } from '@/components/chaos/FailoverSimulatorModal';
 import { DataError } from '@/components/ui/data-error';
 
 function WorkerStatusBadge({ state }: { state: WorkerNode['state'] }) {
@@ -58,8 +61,7 @@ function WorkerStatusBadge({ state }: { state: WorkerNode['state'] }) {
 
 function UsageBar({ value }: { value: number }) {
   const pct = Math.min(100, Math.max(0, Math.round(value)));
-  const color =
-    pct > 80 ? 'bg-destructive' : pct > 60 ? 'bg-amber-500' : 'bg-emerald-500';
+  const color = pct > 80 ? 'bg-destructive' : pct > 60 ? 'bg-amber-500' : 'bg-emerald-500';
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
@@ -76,6 +78,7 @@ export function WorkersPage() {
   const [searchQuery, setSearchQuery] = React.useState('');
   const [currentPage, setCurrentPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(5);
+  const [isChaosModalOpen, setIsChaosModalOpen] = React.useState(false);
 
   const {
     data: workers = [],
@@ -89,7 +92,11 @@ export function WorkersPage() {
     refetchInterval: 5000,
   });
 
-  const { data: scores = [], isError: isScoresError, error: scoresError } = useQuery<WorkerScoreBreakdown[]>({
+  const {
+    data: scores = [],
+    isError: isScoresError,
+    error: scoresError,
+  } = useQuery<WorkerScoreBreakdown[]>({
     queryKey: ['worker-scores'],
     queryFn: () => api.getWorkerScores(512),
     refetchInterval: 5000,
@@ -103,6 +110,26 @@ export function WorkersPage() {
       queryClient.invalidateQueries({ queryKey: ['worker-scores'] });
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
       setTimeout(() => setSweepFeedback(null), 5000);
+    },
+  });
+
+  const dropoutMutation = useMutation({
+    mutationFn: (id: string) => api.simulateWorkerDropout(id),
+    onSuccess: (result) => {
+      setSweepFeedback(result);
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      queryClient.invalidateQueries({ queryKey: ['worker-scores'] });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      setTimeout(() => setSweepFeedback(null), 5000);
+    },
+  });
+
+  const reconnectMutation = useMutation({
+    mutationFn: (id: string) => api.simulateWorkerReconnect(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workers'] });
+      queryClient.invalidateQueries({ queryKey: ['worker-scores'] });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
     },
   });
 
@@ -132,10 +159,7 @@ export function WorkersPage() {
   };
 
   const onlineCount = workers.filter((w) => w.state !== 'offline').length;
-  const totalContainers = workers.reduce(
-    (sum, w) => sum + (w.resources?.activeContainers ?? 0),
-    0
-  );
+  const totalContainers = workers.reduce((sum, w) => sum + (w.resources?.activeContainers ?? 0), 0);
   const totalCores = workers.reduce((sum, w) => sum + (w.resources?.cpuCount ?? 0), 0);
   const totalRamGb = (
     workers.reduce((sum, w) => sum + (w.resources?.totalMemoryMb ?? 0), 0) / 1024
@@ -157,12 +181,22 @@ export function WorkersPage() {
             Worker Nodes
           </h1>
           <p className="text-sm text-muted-foreground">
-            Distributed workstations contributing CPU cores, memory leases, and Docker container execution.
+            Distributed workstations contributing CPU cores, memory leases, and Docker container
+            execution.
           </p>
         </div>
 
         {/* Equalizer & Health Sweeper Actions */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsChaosModalOpen(true)}
+            className="h-8.5 text-xs flex items-center gap-1.5 font-semibold cursor-pointer text-destructive hover:text-destructive"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            <span>Chaos Drill</span>
+          </Button>
           <NavLink to="/equalizer">
             <Button
               size="sm"
@@ -187,12 +221,12 @@ export function WorkersPage() {
 
       {/* Sweeper Feedback Banner */}
       {sweepFeedback && (
-        <div className="p-3 bg-secondary/60 border border-border rounded-lg text-xs flex items-center justify-between gap-2">
+        <div className="p-3 bg-secondary/60 border border-border rounded-md text-xs flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
             <span className="text-foreground">
-              Cluster health sweep executed: {sweepFeedback.offlineWorkers.length} offline nodes detected,{' '}
-              {sweepFeedback.rescheduledDeployments.length} deployments rescheduled.
+              Cluster health sweep executed: {sweepFeedback.offlineWorkers.length} offline nodes
+              detected, {sweepFeedback.rescheduledDeployments.length} deployments rescheduled.
             </span>
           </div>
           <span className="text-[10px] font-mono text-muted-foreground">
@@ -339,13 +373,15 @@ export function WorkersPage() {
             {paginatedWorkers.map((worker) => {
               const scoreInfo = getScoreForWorker(worker.id);
               const memUsedPct = worker.resources
-                ? (worker.resources.usedMemoryMb / Math.max(worker.resources.totalMemoryMb, 1)) * 100
+                ? (worker.resources.usedMemoryMb / Math.max(worker.resources.totalMemoryMb, 1)) *
+                  100
                 : 0;
               const lastHeartbeat = new Date(worker.lastHeartbeatAt).getTime();
               const secondsAgo = Math.floor((Date.now() - lastHeartbeat) / 1000);
               const isFresh = secondsAgo < 15 && worker.state !== 'offline';
               const isWarning = secondsAgo >= 15 && secondsAgo < 30 && worker.state !== 'offline';
-              const leaseStatus = worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
+              const leaseStatus =
+                worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
 
               return (
                 <Card key={worker.id} className="transition-all hover:border-foreground/20">
@@ -358,7 +394,9 @@ export function WorkersPage() {
                         </div>
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-foreground text-sm">{worker.name}</span>
+                            <span className="font-semibold text-foreground text-sm">
+                              {worker.name}
+                            </span>
                             <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
                               {worker.hostname}
                             </span>
@@ -366,11 +404,13 @@ export function WorkersPage() {
                               {worker.ipAddress}
                             </span>
                           </div>
-                          <p className="text-xs text-muted-foreground font-mono mt-0.5">{worker.id}</p>
+                          <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                            {worker.id}
+                          </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                      <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
                         {scoreInfo && (
                           <div className="text-right mr-2 hidden sm:block">
                             <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
@@ -382,6 +422,31 @@ export function WorkersPage() {
                           </div>
                         )}
                         <WorkerStatusBadge state={worker.state} />
+
+                        {worker.state === 'offline' ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => reconnectMutation.mutate(worker.id)}
+                            disabled={reconnectMutation.isPending}
+                            className="h-6 text-[10px] px-2 flex items-center gap-1 cursor-pointer font-semibold"
+                          >
+                            <RefreshCw className="h-2.5 w-2.5" />
+                            <span>Restore</span>
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => dropoutMutation.mutate(worker.id)}
+                            disabled={dropoutMutation.isPending}
+                            className="h-6 text-[10px] px-2 text-destructive hover:text-destructive flex items-center gap-1 cursor-pointer font-semibold"
+                            title="Simulate Wi-Fi or hardware disconnect"
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            <span>Dropout</span>
+                          </Button>
+                        )}
                       </div>
                     </div>
 
@@ -454,8 +519,11 @@ export function WorkersPage() {
                           <span>CPU Ratio: {(scoreInfo.cpuRatio * 100).toFixed(0)}%</span>
                           <span>•</span>
                           <span>
-                            Placement Gate: {scoreInfo.eligible ? (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Eligible (Passed)</span>
+                            Placement Gate:{' '}
+                            {scoreInfo.eligible ? (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                                Eligible (Passed)
+                              </span>
                             ) : (
                               <span className="text-destructive font-semibold">Ineligible</span>
                             )}
@@ -485,6 +553,13 @@ export function WorkersPage() {
           />
         </div>
       )}
+
+      {/* Failure & Recovery Chaos Simulator Modal */}
+      <FailoverSimulatorModal
+        isOpen={isChaosModalOpen}
+        onClose={() => setIsChaosModalOpen(false)}
+        workers={workers}
+      />
     </div>
   );
 }

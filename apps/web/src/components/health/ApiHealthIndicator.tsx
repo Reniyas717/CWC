@@ -34,7 +34,9 @@ export function ApiHealthIndicator() {
             </CardTitle>
             <CardDescription className="text-xs">
               Live health verification against{' '}
-              <code className="text-foreground font-mono text-[11px] bg-secondary px-1.5 py-0.5 rounded">{API_URL}/health</code>
+              <code className="text-foreground font-mono text-[11px] bg-secondary px-1.5 py-0.5 rounded">
+                {API_URL}/health
+              </code>
             </CardDescription>
           </div>
 
@@ -68,7 +70,9 @@ export function ApiHealthIndicator() {
               disabled={isFetching}
               title="Refresh API Health"
             >
-              <RefreshCw className={`h-3.5 w-3.5 text-muted-foreground ${isFetching ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`h-3.5 w-3.5 text-muted-foreground ${isFetching ? 'animate-spin' : ''}`}
+              />
             </Button>
           </div>
         </div>
@@ -79,19 +83,29 @@ export function ApiHealthIndicator() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3 bg-secondary/30 p-4 rounded-lg border border-border">
               <div className="space-y-1">
-                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Service</span>
-                <span className="text-xs font-medium text-foreground truncate block">{data.service}</span>
+                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">
+                  Service
+                </span>
+                <span className="text-xs font-medium text-foreground truncate block">
+                  {data.service}
+                </span>
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Version</span>
+                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">
+                  Version
+                </span>
                 <span className="text-xs font-mono text-foreground">v{data.version}</span>
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Uptime</span>
+                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">
+                  Uptime
+                </span>
                 <span className="text-xs font-mono text-foreground">{data.uptime}s</span>
               </div>
               <div className="space-y-1">
-                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">Environment</span>
+                <span className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground block">
+                  Environment
+                </span>
                 <span className="text-xs capitalize text-foreground">{data.environment}</span>
               </div>
             </div>
@@ -101,7 +115,9 @@ export function ApiHealthIndicator() {
                 <div className="flex items-center gap-2">
                   <Database className="h-4 w-4 shrink-0 text-amber-500" />
                   <span>
-                    API server is active and running in <strong>local development fallback mode</strong>. Backing database/cache services are simulated in-memory.
+                    API server is active and running in{' '}
+                    <strong>local development fallback mode</strong>. Backing database/cache
+                    services are simulated in-memory.
                   </span>
                 </div>
                 <span className="text-[10px] font-mono shrink-0 uppercase tracking-wider bg-amber-500/20 px-2 py-0.5 rounded">

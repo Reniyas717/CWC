@@ -28,20 +28,25 @@ export const workersRouter: Router = Router();
  * Maps a database row from `worker_nodes` to the canonical `WorkerNode` interface.
  */
 function mapWorkerRowToNode(row: typeof workerNodes.$inferSelect): WorkerNode {
+  const isHeartbeatExpired =
+    Date.now() - new Date(row.lastHeartbeatAt).getTime() > 30_000;
+  const effectiveState =
+    row.state !== 'draining' && isHeartbeatExpired ? 'offline' : row.state;
+
   return {
     id: row.id,
     name: row.name,
     hostname: row.hostname,
     ipAddress: row.ipAddress,
     port: row.port,
-    state: row.state,
+    state: effectiveState,
     resources: {
       cpuCount: row.cpuCores,
       cpuUsagePercent: row.cpuUsagePercent,
       totalMemoryMb: row.totalMemoryMb,
       freeMemoryMb: row.freeMemoryMb,
       usedMemoryMb: row.usedMemoryMb,
-      activeContainers: row.activeContainers,
+      activeContainers: effectiveState === 'offline' ? 0 : row.activeContainers,
     },
     limits: {
       maxConcurrentWorkloads: row.maxConcurrentWorkloads,
@@ -724,6 +729,91 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
       error: {
         code: 'TASK_POLL_FAILED',
         message: 'Failed to poll deployment tasks',
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/workers/:id/simulate-dropout
+ * Simulates a worker laptop abruptly dropping offline / losing connectivity (hackathon chaos demo).
+ * Rewinds lastHeartbeatAt beyond the 30-second lease threshold and triggers an immediate health sweep.
+ */
+workersRouter.post('/:id/simulate-dropout', optionalAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const expiredTimestamp = new Date(Date.now() - 45_000); // 45s ago (>30s lease)
+    await db
+      .update(workerNodes)
+      .set({
+        lastHeartbeatAt: expiredTimestamp,
+      })
+      .where(eq(workerNodes.id, id));
+
+    // Clear active lease from Redis
+    await removeWorkerFromCache(id).catch(() => {});
+
+    // Run health sweeper immediately to declare node offline and reschedule active workloads
+    const sweepResult = await sweepWorkerHealth();
+
+    res.status(200).json({
+      success: true,
+      simulated: true,
+      workerId: id,
+      state: 'offline',
+      message: `Simulated dropout for worker '${id}'. Heartbeat expired and failure recovery sweep executed.`,
+      sweep: sweepResult,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SIMULATE_DROPOUT_FAILED',
+        message: `Failed to simulate dropout for worker '${id}'`,
+        details: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/v1/workers/:id/simulate-reconnect
+ * Restores an offline worker node back to healthy 'idle' state.
+ */
+workersRouter.post('/:id/simulate-reconnect', optionalAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const now = new Date();
+    await db
+      .update(workerNodes)
+      .set({
+        state: 'idle',
+        lastHeartbeatAt: now,
+      })
+      .where(eq(workerNodes.id, id));
+
+    await recordWorkerHeartbeatInCache(id, now.toISOString()).catch(() => {});
+
+    // Re-evaluate any pending deployments that could be scheduled on this reconnected worker
+    schedulePendingDeployments().catch(() => {});
+
+    res.status(200).json({
+      success: true,
+      simulated: true,
+      workerId: id,
+      state: 'idle',
+      message: `Worker '${id}' reconnected to cluster and is ready for workloads.`,
+      timestamp: now.toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'SIMULATE_RECONNECT_FAILED',
+        message: `Failed to reconnect worker '${id}'`,
         details: error instanceof Error ? error.message : String(error),
       },
     });

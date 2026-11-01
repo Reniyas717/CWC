@@ -122,6 +122,7 @@ export class DeploymentRunner {
         workingDir,
         dockerfilePath,
         buildContext,
+        targetPort: task.targetPort,
         signal: abortController.signal,
       });
 

@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { AnimatedPipeline } from '@/components/deployments/AnimatedPipeline';
 import { DataError } from '@/components/ui/data-error';
 
 function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
@@ -92,7 +93,7 @@ function RoutingStatusBadge({ deployment }: { deployment: Deployment }) {
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
       <Loader className="h-3 w-3 animate-spin" />
-      Publishing public route…
+      Publishing public routeâ€¦
     </span>
   );
 }
@@ -224,6 +225,14 @@ export function DeploymentsPage() {
         })}
       </div>
 
+      {/* Animated SVG Deployment Execution Pipeline */}
+      <div className="rounded-md border border-border bg-card p-4 space-y-2">
+        <AnimatedPipeline
+          currentStage={runningCount > 0 ? 'ingress' : 'git'}
+          status={failedCount > 0 ? 'failed' : runningCount > 0 ? 'running' : 'idle'}
+        />
+      </div>
+
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
@@ -348,9 +357,9 @@ export function DeploymentsPage() {
                           <span className="bg-secondary px-1.5 py-0.2 rounded">
                             {dep.gitCommitHash || 'head'}
                           </span>
-                          <span>•</span>
+                          <span>â€¢</span>
                           <span>v{dep.version}</span>
-                          <span>•</span>
+                          <span>â€¢</span>
                           <span>{timeAgo(dep.createdAt)}</span>
                         </div>
                       </div>
