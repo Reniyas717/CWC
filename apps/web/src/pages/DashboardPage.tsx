@@ -21,11 +21,15 @@ import {
   Activity,
   CheckCircle2,
   Scale,
+  Zap,
 } from 'lucide-react';
 import { Deployment } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown } from '@/services/api';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { AnimatedPipeline } from '@/components/deployments/AnimatedPipeline';
+import { ClusterAnalyticsView } from '@/components/analytics/ClusterAnalyticsView';
+import { FailoverSimulatorModal } from '@/components/chaos/FailoverSimulatorModal';
 import { DataError } from '@/components/ui/data-error';
 
 const topology = [
@@ -51,6 +55,7 @@ const topology = [
 
 export function DashboardPage() {
   const [isDeployModalOpen, setIsDeployModalOpen] = React.useState(false);
+  const [isChaosModalOpen, setIsChaosModalOpen] = React.useState(false);
   const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
 
   const {
@@ -152,7 +157,15 @@ export function DashboardPage() {
             Control plane overview, distributed worker telemetry, and workload orchestration.
           </p>
         </div>
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+          <Button
+            variant="outline"
+            onClick={() => setIsChaosModalOpen(true)}
+            className="h-9 px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer text-destructive hover:text-destructive"
+          >
+            <Zap className="h-3.5 w-3.5" />
+            <span>Failover Chaos Drill</span>
+          </Button>
           <NavLink to="/equalizer">
             <Button
               variant="outline"
@@ -174,6 +187,14 @@ export function DashboardPage() {
 
       {/* Backend API Health Indicator */}
       <ApiHealthIndicator />
+
+      {/* Animated SVG Deployment Execution Pipeline */}
+      <div className="rounded-md border border-border bg-card p-4 space-y-2">
+        <AnimatedPipeline
+          currentStage={runningCount > 0 ? 'ingress' : 'scheduler'}
+          status={runningCount > 0 ? 'running' : 'idle'}
+        />
+      </div>
 
       {isWorkersError && (
         <DataError
@@ -220,6 +241,9 @@ export function DashboardPage() {
           );
         })}
       </div>
+
+      {/* Real-Time Cluster Capacity & S(W) Telemetry Fabric */}
+      <ClusterAnalyticsView workers={workers} scores={scores} />
 
       {/* Live Activity & Fleet Status Master Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -294,7 +318,9 @@ export function DashboardPage() {
                         </div>
                         <p className="text-[11px] text-muted-foreground truncate mt-0.5">
                           {dep.applicationId} • Node:{' '}
-                          <span className="font-mono text-foreground">{dep.workerId || 'pending'}</span>
+                          <span className="font-mono text-foreground">
+                            {dep.workerId || 'pending'}
+                          </span>
                         </p>
                       </div>
 
@@ -369,7 +395,7 @@ export function DashboardPage() {
                     return (
                       <div
                         key={w.id}
-                        className="p-3 bg-secondary/30 rounded-lg border border-border flex items-center justify-between gap-3 text-xs"
+                        className="p-3 bg-secondary/30 rounded-md border border-border flex items-center justify-between gap-3 text-xs"
                       >
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
@@ -442,7 +468,7 @@ export function DashboardPage() {
               return (
                 <div
                   key={item.index}
-                  className="p-4 bg-secondary/20 rounded-lg border border-border space-y-2"
+                  className="p-4 bg-secondary/20 rounded-md border border-border space-y-2"
                 >
                   <div className="flex items-center gap-2">
                     <div className="h-6 w-6 rounded-md bg-secondary flex items-center justify-center shrink-0">
@@ -478,6 +504,13 @@ export function DashboardPage() {
         deployment={selectedLogDep}
         isOpen={!!selectedLogDep}
         onClose={() => setSelectedLogDep(null)}
+      />
+
+      {/* Failure & Recovery Chaos Simulator Modal */}
+      <FailoverSimulatorModal
+        isOpen={isChaosModalOpen}
+        onClose={() => setIsChaosModalOpen(false)}
+        workers={workers}
       />
     </div>
   );

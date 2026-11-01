@@ -90,6 +90,7 @@ const CreateDeploymentInputSchema = z.object({
     commitHash: z.string().optional(),
   }),
   port: z.number().int().min(1).max(65535).default(3000),
+  replicas: z.number().int().min(1).max(5).default(1),
   env: z
     .array(
       z.object({
@@ -197,52 +198,64 @@ deploymentsRouter.post('/', requireAdmin, async (req: Request, res: Response) =>
       }
     }
 
-    // 2. Resource-Aware Worker Selection (Least-Loaded Placement)
-    const placement = await selectBestWorker(
-      payload.resourceLimits.memoryLimitMb,
-      payload.workerId
-    );
-    const assignedWorkerId = placement.worker ? placement.worker.id : null;
-    const placementScore = placement.score;
-
-    // 3. Compute deployment version number
+    // 2. Compute base deployment version number
     const prevDeployments = await db
       .select({ version: deployments.version })
       .from(deployments)
       .where(eq(deployments.applicationId, appId));
 
-    const nextVersion = prevDeployments.length + 1;
-    const deploymentId = `dep-${randomUUID().slice(0, 8)}`;
+    const numReplicas = Math.max(1, Math.min(5, payload.replicas || 1));
+    const createdDeployments = [];
 
-    // 4. Create deployment record in state 'queued'
-    await db.insert(deployments).values({
-      id: deploymentId,
-      applicationId: appId,
-      workerId: assignedWorkerId ?? null,
-      version: nextVersion,
-      gitCommitHash: payload.git.commitHash,
-      gitBranch: payload.git.branch,
-      state: 'queued',
-      createdAt: now,
-      updatedAt: now,
-    });
+    // 3. Multi-Replica Placement: Schedule N replicas across least-loaded workers
+    for (let r = 0; r < numReplicas; r++) {
+      const placement = await selectBestWorker(
+        payload.resourceLimits.memoryLimitMb,
+        payload.workerId
+      );
+      const assignedWorkerId = placement.worker ? placement.worker.id : null;
+      const placementScore = placement.score;
 
-    // 5. Record discrete audit event
-    await db.insert(deploymentEvents).values({
-      deploymentId,
-      eventType: 'SCHEDULED',
-      details: assignedWorkerId
-        ? `Queued and assigned to least-loaded worker '${assignedWorkerId}' (Load Score: ${placementScore ?? 'N/A'})`
-        : `Queued (awaiting worker availability: ${placement.reason || 'no eligible worker'})`,
-      timestamp: now,
-    });
+      const nextVersion = prevDeployments.length + 1 + r;
+      const deploymentId = `dep-${randomUUID().slice(0, 8)}`;
 
-    const createdRows = await db.select().from(deployments).where(eq(deployments.id, deploymentId));
+      // Create deployment record in state 'queued'
+      await db.insert(deployments).values({
+        id: deploymentId,
+        applicationId: appId,
+        workerId: assignedWorkerId ?? null,
+        version: nextVersion,
+        gitCommitHash: payload.git.commitHash,
+        gitBranch: payload.git.branch,
+        state: 'queued',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      // Record discrete audit event
+      await db.insert(deploymentEvents).values({
+        deploymentId,
+        eventType: 'SCHEDULED',
+        details: assignedWorkerId
+          ? `Queued replica #${r + 1} and assigned to least-loaded worker '${assignedWorkerId}' (Load Score: ${placementScore ?? 'N/A'})`
+          : `Queued replica #${r + 1} (awaiting worker availability: ${placement.reason || 'no eligible worker'})`,
+        timestamp: now,
+      });
+
+      const createdRows = await db.select().from(deployments).where(eq(deployments.id, deploymentId));
+      if (createdRows[0]) {
+        createdDeployments.push(mapDeploymentRow(createdRows[0]));
+      }
+    }
 
     res.status(201).json({
       success: true,
-      data: mapDeploymentRow(createdRows[0]),
-      message: 'Deployment queued successfully',
+      data: createdDeployments[0],
+      replicas: createdDeployments,
+      count: createdDeployments.length,
+      message: numReplicas > 1
+        ? `${numReplicas} replicas scheduled across available distributed workers`
+        : 'Deployment queued successfully',
     });
   } catch (error) {
     res.status(500).json({

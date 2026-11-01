@@ -14,7 +14,7 @@ import {
   Terminal,
   StopCircle,
 } from 'lucide-react';
-import { AppConfig, AppFramework, Deployment } from '@cloud-without-clouds/shared';
+import { AppConfig, AppFramework, Deployment, WorkerNode } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { NewApplicationModal } from '@/components/applications/NewApplicationModal';
 import { DeploymentLogsModal } from '@/components/deployments/DeploymentLogsModal';
+import { ReplicaTopologyView } from '@/components/deployments/ReplicaTopologyView';
 import { DataError } from '@/components/ui/data-error';
 
 export function ApplicationsPage() {
@@ -35,6 +36,7 @@ export function ApplicationsPage() {
   const [actionSuccess, setActionSuccess] = React.useState<string | null>(null);
   const [currentPage, setCurrentPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(5);
+  const [expandedAppId, setExpandedAppId] = React.useState<string | null>(null);
 
   const {
     data: apps = [],
@@ -55,6 +57,12 @@ export function ApplicationsPage() {
   } = useQuery<Deployment[]>({
     queryKey: ['deployments'],
     queryFn: () => api.getDeployments(),
+    refetchInterval: 5000,
+  });
+
+  const { data: workers = [] } = useQuery<WorkerNode[]>({
+    queryKey: ['workers'],
+    queryFn: () => api.getWorkers(),
     refetchInterval: 5000,
   });
 
@@ -467,7 +475,21 @@ export function ApplicationsPage() {
                     </div>
 
                     {/* Right: Actions */}
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      <Button
+                        variant={expandedAppId === app.id ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() =>
+                          setExpandedAppId((prev) => (prev === app.id ? null : app.id))
+                        }
+                        className="text-xs h-8 px-2.5 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Layers className="h-3 w-3" />
+                        <span>
+                          {expandedAppId === app.id ? 'Hide Topology' : 'Replicas & Topology'}
+                        </span>
+                      </Button>
+
                       {latestDep && (
                         <Button
                           variant="outline"
@@ -507,6 +529,19 @@ export function ApplicationsPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Expandable Multi-Replica Topology View */}
+                  {expandedAppId === app.id && (
+                    <div className="px-5 pb-5 pt-2 border-t border-border animate-in fade-in duration-200">
+                      <ReplicaTopologyView
+                        applicationName={app.name}
+                        applicationSlug={app.slug}
+                        deployments={deployments.filter((d) => d.applicationId === app.id)}
+                        workers={workers}
+                        publicUrl={latestDep?.publicUrl}
+                      />
+                    </div>
+                  )}
                 </Card>
               );
             })}

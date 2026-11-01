@@ -132,7 +132,6 @@ async function getApiErrorMessage(response: Response): Promise<string> {
   return `Control plane rejected the deployment request (HTTP ${response.status}).`;
 }
 
-
 function loadLocalApps(): AppConfig[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_APPS);
@@ -168,7 +167,6 @@ function saveLocalDeployments(deps: Deployment[]): void {
     console.warn('Failed to save deployments cache', err);
   }
 }
-
 
 function computeFallbackWorkerScores(
   workers: WorkerNode[],
@@ -261,6 +259,7 @@ export const api = {
         framework: input.framework,
         git: input.git,
         port: input.port || 3000,
+        replicas: input.replicas || 1,
         env: input.env || [],
         resourceLimits: input.resourceLimits || {
           cpuLimitCores: 1.0,
@@ -393,7 +392,11 @@ export const api = {
     });
 
     if (!json.data) {
-      throw new ApiRequestError('Control plane did not return the new deployment', 502, 'INVALID_RESPONSE');
+      throw new ApiRequestError(
+        'Control plane did not return the new deployment',
+        502,
+        'INVALID_RESPONSE'
+      );
     }
     return json.data;
   },
@@ -458,6 +461,41 @@ export const api = {
   },
 
   /**
+   * Simulates a worker node dropout / power failure to demonstrate autonomous self-healing.
+   */
+  async simulateWorkerDropout(workerId: string): Promise<SweepResult> {
+    const json = await requestJson<{ sweep: SweepResult }>(
+      `${API_URL}/api/v1/workers/${encodeURIComponent(workerId)}/simulate-dropout`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    return (
+      json.data?.sweep || {
+        offlineWorkers: [workerId],
+        rescheduledDeployments: [],
+        failedDeployments: [],
+        timestamp: new Date().toISOString(),
+      }
+    );
+  },
+
+  /**
+   * Restores a previously simulated offline worker back to the cluster.
+   */
+  async simulateWorkerReconnect(workerId: string): Promise<boolean> {
+    await requestJson<unknown>(
+      `${API_URL}/api/v1/workers/${encodeURIComponent(workerId)}/simulate-reconnect`,
+      {
+        method: 'POST',
+        headers: this.getAuthHeaders(),
+      }
+    );
+    return true;
+  },
+
+  /**
    * Relocates a deployment to a designated target worker node.
    * Performs capacity pre-flight validation on the control plane.
    */
@@ -484,7 +522,12 @@ export const api = {
         }
       }
     } catch (err) {
-      if (err instanceof Error && !err.message.includes('fetch') && !err.message.includes('Failed query') && !err.message.includes('DATABASE_ERROR')) {
+      if (
+        err instanceof Error &&
+        !err.message.includes('fetch') &&
+        !err.message.includes('Failed query') &&
+        !err.message.includes('DATABASE_ERROR')
+      ) {
         throw err;
       }
     }
