@@ -224,6 +224,7 @@ The following commands are defined in the workspace `package.json` files and ver
 - `apps/api` cancellation and queue progression check: `pnpm --filter @cloud-without-clouds/api test:cancellation-ack` (requires API, PostgreSQL, and migrations)
 - `apps/api` stale runtime route check: `pnpm --filter @cloud-without-clouds/api test:runtime-failure-cleanup` (requires API, PostgreSQL, and migrations)
 - `apps/api` worker restart reconciliation check: `pnpm --filter @cloud-without-clouds/api test:heartbeat-reconciliation` (requires API, PostgreSQL, and migrations)
+- `apps/api` duplicate worker ID check: `pnpm --filter @cloud-without-clouds/api test:worker-id-conflict` (requires API and PostgreSQL)
 - `apps/worker`: `pnpm --filter @cloud-without-clouds/worker build` (`tsup src/index.ts --format esm --out-dir dist`)
 - `apps/worker` Tailscale discovery check: `pnpm --filter @cloud-without-clouds/worker test:tailscale-address`
 - `apps/web`: `pnpm --filter @cloud-without-clouds/web build` (`tsc -b && vite build`)

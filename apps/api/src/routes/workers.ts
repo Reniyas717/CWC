@@ -7,6 +7,7 @@ import {
   WorkerNode,
   WorkerStatusResponse,
   DeploymentTaskPayload,
+  TailscaleIpv4Schema,
 } from '@cloud-without-clouds/shared';
 import { z } from 'zod';
 import { requireWorker, optionalAdmin } from '../middlewares/auth.js';
@@ -25,6 +26,21 @@ import {
 } from '../services/scheduler.js';
 
 export const workersRouter: Router = Router();
+
+function getTailscalePeerAddress(req: Request): string | undefined {
+  const address = (req.ip ?? '').replace(/^::ffff:/, '');
+  return TailscaleIpv4Schema.safeParse(address).success ? address : undefined;
+}
+
+function rejectWorkerIdentityMismatch(res: Response, workerId: string): void {
+  res.status(409).json({
+    success: false,
+    error: {
+      code: 'WORKER_IDENTITY_MISMATCH',
+      message: `Request for worker '${workerId}' came from a different Tailscale address than the registered machine`,
+    },
+  });
+}
 
 /**
  * Maps a database row from `worker_nodes` to the canonical `WorkerNode` interface.
@@ -302,6 +318,30 @@ workersRouter.post('/register', requireWorker, async (req: Request, res: Respons
   const now = new Date();
 
   try {
+    const currentRegistration = await db
+      .select({
+        hostname: workerNodes.hostname,
+        lastHeartbeatAt: workerNodes.lastHeartbeatAt,
+      })
+      .from(workerNodes)
+      .where(eq(workerNodes.id, payload.id));
+
+    const currentOwner = currentRegistration[0];
+    if (
+      currentOwner &&
+      currentOwner.hostname !== payload.hostname &&
+      now.getTime() - currentOwner.lastHeartbeatAt.getTime() <= 30_000
+    ) {
+      res.status(409).json({
+        success: false,
+        error: {
+          code: 'WORKER_ID_CONFLICT',
+          message: `Worker ID '${payload.id}' is already registered by another active machine. Configure a unique WORKER_ID for this laptop.`,
+        },
+      });
+      return;
+    }
+
     // Upsert into PostgreSQL
     await db
       .insert(workerNodes)
@@ -401,7 +441,7 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
   try {
     // Check if worker exists
     const existing = await db
-      .select({ id: workerNodes.id })
+      .select({ id: workerNodes.id, ipAddress: workerNodes.ipAddress })
       .from(workerNodes)
       .where(eq(workerNodes.id, payload.workerId));
 
@@ -413,6 +453,12 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
           message: `Worker '${payload.workerId}' is not registered. Please register first.`,
         },
       });
+      return;
+    }
+
+    const peerAddress = getTailscalePeerAddress(req);
+    if (peerAddress && peerAddress !== existing[0].ipAddress) {
+      rejectWorkerIdentityMismatch(res, payload.workerId);
       return;
     }
 
@@ -563,6 +609,12 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
           message: `Worker node '${id}' not registered. Please register first.`,
         },
       });
+      return;
+    }
+
+    const peerAddress = getTailscalePeerAddress(req);
+    if (peerAddress && peerAddress !== existingWorker[0].ipAddress) {
+      rejectWorkerIdentityMismatch(res, id);
       return;
     }
 

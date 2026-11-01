@@ -23,9 +23,10 @@
     "test:cancellation-ack": "node test-cancellation-ack.js",
     "test:runtime-failure-cleanup": "node test-runtime-failure-cleanup.js",
     "test:heartbeat-reconciliation": "node test-heartbeat-reconciliation.js",
+    "test:worker-id-conflict": "node test-worker-id-conflict.js",
     "test:worker-recovery": "node test-worker-recovery.js",
     "test:finops": "node test-finops.js",
-    "test:all": "node test-auth.js && node test-phase4.js && node test-phase5.js && node test-phase6.js && node test-worker-network.js && node test-task-claim.js && node test-result-ownership.js && node test-cancellation-ack.js && node test-runtime-failure-cleanup.js && node test-heartbeat-reconciliation.js && node test-worker-recovery.js"
+    "test:all": "node test-auth.js && node test-phase4.js && node test-phase5.js && node test-phase6.js && node test-worker-network.js && node test-task-claim.js && node test-result-ownership.js && node test-cancellation-ack.js && node test-runtime-failure-cleanup.js && node test-heartbeat-reconciliation.js && node test-worker-id-conflict.js && node test-worker-recovery.js"
   },
   "dependencies": {
     "@cloud-without-clouds/shared": "workspace:*",

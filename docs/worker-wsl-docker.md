@@ -2,6 +2,8 @@
 
 Run the worker with Linux Node in the same Ubuntu/WSL distro as Tailscale. The worker must reach a Linux Docker engine before it can accept deployments. Installing Docker Desktop on Windows alone does not guarantee the Ubuntu distro has a usable Docker socket.
 
+Give each participating laptop a unique `WORKER_ID`. The API now rejects attempts by a different active hostname to reuse an ID, and it checks that Tailscale heartbeat/task requests come from the address registered to that worker. If `WORKER_ID` is omitted, the agent derives one from the machine hostname.
+
 Start Docker Desktop, then run from the repository root inside Ubuntu:
 
 ```bash
