@@ -4,12 +4,14 @@ import { workersRouter } from './workers.js';
 import { applicationsRouter } from './applications.js';
 import { deploymentsRouter } from './deployments.js';
 import { internalDeploymentsRouter } from './internal-deployments.js';
+import { authRouter } from './auth.js';
 import { finopsRouter } from './finops.js';
 
 export const apiRouter: Router = Router();
 
 // Mount root health check
 apiRouter.use(healthRouter);
+apiRouter.use('/api/auth', authRouter);
 
 // Mount modular feature routes under /api/v1
 apiRouter.use('/api/v1/workers', workersRouter);

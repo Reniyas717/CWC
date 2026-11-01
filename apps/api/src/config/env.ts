@@ -26,6 +26,10 @@ const EnvSchema = z.object({
   WORKER_SECRET_TOKEN: z.string().min(8).default('dev-worker-secret-token-change-in-production'),
   GATEWAY_URL: z.string().default('http://localhost:5050'),
   GATEWAY_TOKEN: z.string().default('dev-gateway-secret-token-change-in-production'),
+  GITHUB_CLIENT_ID: z.string().optional(),
+  GITHUB_CLIENT_SECRET: z.string().optional(),
+  SESSION_SECRET: z.string().min(32).default('development-session-secret-change-before-deploy'),
+  PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

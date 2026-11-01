@@ -8,7 +8,6 @@ import {
 } from '@cloud-without-clouds/shared';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-const ADMIN_TOKEN = import.meta.env.VITE_ADMIN_TOKEN || 'dev-admin-token-change-in-production';
 
 export class ApiRequestError extends Error {
   readonly status?: number;
@@ -34,7 +33,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<ApiRespo
   let response: Response;
 
   try {
-    response = await fetch(url, init);
+    response = await fetch(url, { ...init, credentials: 'include' });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Network request failed';
     throw new ApiRequestError(`Control plane unavailable: ${message}`, 0, 'NETWORK_ERROR');
@@ -233,7 +232,6 @@ export const api = {
   getAuthHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${ADMIN_TOKEN}`,
     };
   },
 
@@ -291,6 +289,7 @@ export const api = {
       };
 
       const res = await fetch(`${API_URL}/api/v1/deployments`, {
+        credentials: 'include',
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify(payload),
@@ -525,6 +524,7 @@ export const api = {
   async relocateDeployment(deploymentId: string, targetWorkerId: string): Promise<Deployment> {
     try {
       const res = await fetch(`${API_URL}/api/v1/deployments/${deploymentId}/relocate`, {
+        credentials: 'include',
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({ targetWorkerId }),
@@ -579,6 +579,7 @@ export const api = {
     const { dryRun = false } = options;
     try {
       const res = await fetch(`${API_URL}/api/v1/workers/rebalance`, {
+        credentials: 'include',
         method: 'POST',
         headers: this.getAuthHeaders(),
         body: JSON.stringify({ dryRun }),

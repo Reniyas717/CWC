@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { env } from '../config/env.js';
+import { readSessionCookie } from '../services/auth-session.js';
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -27,6 +28,12 @@ function extractBearerToken(req: Request): string | null {
  * Protects user/admin mutating operations (e.g. creating/cancelling deployments).
  */
 export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  const session = readSessionCookie(req.headers.cookie);
+  if (session) {
+    req.user = { id: session.id, role: 'admin' };
+    next();
+    return;
+  }
   const token = extractBearerToken(req);
 
   if (!token || token !== env.ADMIN_TOKEN) {
@@ -71,6 +78,11 @@ export function requireWorker(req: Request, res: Response, next: NextFunction): 
  * If Authorization header is sent, it must be valid; otherwise allows in development.
  */
 export function optionalAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  const session = readSessionCookie(req.headers.cookie);
+  if (session) {
+    req.user = { id: session.id, role: 'admin' };
+    return next();
+  }
   const token = extractBearerToken(req);
 
   if (token) {
