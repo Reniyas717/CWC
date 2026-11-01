@@ -18,6 +18,7 @@ let isShuttingDown = false;
 let isRegistered = false;
 let taskPoller: TaskPoller | null = null;
 let dockerEngine: DockerEngine | null = null;
+let dockerReady = false;
 
 async function bootstrap() {
   logger.info('==================================================');
@@ -38,6 +39,19 @@ async function bootstrap() {
   const controlPlaneClient = new ControlPlaneClient();
   const gitRunner = new GitRunner();
   dockerEngine = new DockerEngine();
+
+  const initialDockerStatus = await dockerEngine.checkAvailability();
+  dockerReady = initialDockerStatus.available;
+  metricsService.setRuntimeReady(dockerReady);
+  if (dockerReady) {
+    logger.info(
+      `Docker daemon verified reachable${initialDockerStatus.version ? ` (version ${initialDockerStatus.version})` : ''}`
+    );
+  } else {
+    logger.error('Docker daemon is unavailable; worker will remain in error state and will not be eligible for deployments', {
+      error: initialDockerStatus.error,
+    });
+  }
 
   // Reconcile and clean up any orphan containers left by previous ungraceful worker shutdowns
   const orphans = await dockerEngine.reconcileExistingContainers();
@@ -100,6 +114,16 @@ async function bootstrap() {
       if (regResponse.ok) {
         isRegistered = true;
         logger.info('Worker successfully registered with Control Plane');
+        if (!dockerReady) {
+          await controlPlaneClient.sendStatus(
+            workerConfig.WORKER_ID,
+            'error',
+            `Docker runtime unavailable: ${initialDockerStatus.error || 'daemon did not respond'}`
+          );
+          taskPoller?.stop();
+        } else {
+          taskPoller?.start();
+        }
         return true;
       } else if (regResponse.isNotImplemented) {
         logger.warn(
@@ -118,8 +142,14 @@ async function bootstrap() {
 
   await attemptRegistration();
 
-  // 4. Start task polling loop
-  taskPoller.start();
+  // 4. Start task polling only when Docker is ready. Heartbeats remain active
+  // in standby mode so the control plane can observe recovery without
+  // advertising a worker that cannot execute assigned workloads.
+  if (dockerReady) {
+    taskPoller.start();
+  } else {
+    logger.warn('Task polling paused until Docker runtime becomes available');
+  }
 
   // 5. Non-overlapping periodic heartbeat telemetry loop
   const executeHeartbeat = async () => {
@@ -129,6 +159,29 @@ async function bootstrap() {
 
     isHeartbeatRunning = true;
     try {
+      if (dockerEngine) {
+        const dockerStatus = await dockerEngine.checkAvailability();
+        if (dockerStatus.available !== dockerReady) {
+          dockerReady = dockerStatus.available;
+          metricsService.setRuntimeReady(dockerReady);
+          if (dockerReady) {
+            logger.info(
+              `Docker daemon recovered${dockerStatus.version ? ` (version ${dockerStatus.version})` : ''}`
+            );
+            taskPoller?.start();
+          } else {
+            logger.error('Docker daemon became unavailable; pausing deployment eligibility', {
+              error: dockerStatus.error,
+            });
+            taskPoller?.stop();
+          }
+        }
+      }
+
+      if (dockerReady) {
+        await deploymentRunner.reconcileActiveDeployments();
+      }
+
       // If registration was not acknowledged yet, attempt re-registration
       if (!isRegistered) {
         await attemptRegistration();
@@ -213,7 +266,13 @@ async function bootstrap() {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
-  logger.info('[Worker Ready] Worker agent initialized and awaiting deployment tasks.');
+  if (dockerReady) {
+    logger.info('[Worker Ready] Worker agent initialized and awaiting deployment tasks.');
+  } else {
+    logger.warn(
+      '[Worker Standby] Worker agent is connected, but Docker is unavailable. Heartbeats will continue while deployment work is paused.'
+    );
+  }
 }
 
 bootstrap().catch((err: unknown) => {

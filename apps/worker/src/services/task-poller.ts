@@ -12,6 +12,8 @@ export class TaskPoller {
   private isPolling = false;
   private isRunning = false;
   private pollTimer: NodeJS.Timeout | null = null;
+  private handledCancellationIds = new Set<string>();
+  private inFlightCancellationIds = new Set<string>();
 
   constructor(
     controlPlaneClient: ControlPlaneClient,
@@ -39,6 +41,10 @@ export class TaskPoller {
     logger.info('Task poller stopped');
   }
 
+  public isActive(): boolean {
+    return this.isRunning;
+  }
+
   private scheduleNext(): void {
     if (!this.isRunning) return;
     this.pollTimer = setTimeout(() => void this.poll(), this.pollIntervalMs);
@@ -57,9 +63,26 @@ export class TaskPoller {
       if (response.ok && response.data) {
         const rawData = response.data as { action?: string; deploymentId?: string };
         if (rawData.action === 'cancel' || rawData.action === 'stop') {
-          if (rawData.deploymentId) {
+          if (
+            rawData.deploymentId &&
+            !this.handledCancellationIds.has(rawData.deploymentId) &&
+            !this.inFlightCancellationIds.has(rawData.deploymentId)
+          ) {
+            this.inFlightCancellationIds.add(rawData.deploymentId);
             logger.info(`Received stop/cancel directive for deployment ${rawData.deploymentId}`);
-            void this.deploymentRunner.stopDeployment(rawData.deploymentId);
+            void this.deploymentRunner.stopDeployment(rawData.deploymentId).then((acknowledged) => {
+              this.inFlightCancellationIds.delete(rawData.deploymentId!);
+              if (acknowledged) {
+                this.handledCancellationIds.add(rawData.deploymentId!);
+              }
+            }).catch((error: unknown) => {
+              this.inFlightCancellationIds.delete(rawData.deploymentId!);
+              logger.warn(`Cancellation cleanup failed for ${rawData.deploymentId}; it will be retried`, {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+          } else if (rawData.deploymentId) {
+            logger.debug(`Ignoring repeated stop/cancel directive for ${rawData.deploymentId}`);
           }
         } else if (response.data.hasTask && response.data.task) {
           const task = response.data.task;

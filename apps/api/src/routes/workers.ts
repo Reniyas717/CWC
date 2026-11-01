@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { eq, and, or, asc, isNull, count, inArray } from 'drizzle-orm';
+import { eq, and, or, asc, isNull, count, inArray, lt } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import {
   WorkerRegistrationSchema,
@@ -15,6 +15,8 @@ import { workerNodes, deployments, applications } from '../db/schema.js';
 import { memoryStore } from '../db/memory-store.js';
 import { recordWorkerHeartbeatInCache, removeWorkerFromCache } from '../cache/redis.js';
 import { sweepWorkerHealth } from '../services/sweeper.js';
+import { removeDeploymentRoute } from '../services/route-cleanup.js';
+import { reconcileMissingRunningDeployments } from '../services/heartbeat-reconciliation.js';
 import {
   evaluateWorkerEligibility,
   getWorkerLoadScores,
@@ -432,6 +434,30 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
       console.warn('[Workers] Redis heartbeat cache warning:', err.message);
     });
 
+    // A worker restart clears its in-memory active workload set. Once a
+    // running deployment is older than the reconciliation grace period and
+    // absent from a valid heartbeat, mark it failed and remove its guarded
+    // public route. Newly claimed/running work is intentionally ignored by
+    // the helper to avoid false positives during heartbeat/claim races.
+    const missingRunningDeployments = await reconcileMissingRunningDeployments({
+      workerId: payload.workerId,
+      activeWorkloadIds: payload.activeWorkloadIds,
+      now,
+    });
+    for (const deployment of missingRunningDeployments) {
+      void removeDeploymentRoute({
+        deploymentId: deployment.deploymentId,
+        gatewayAttemptId: deployment.attemptId ?? undefined,
+        currentAttemptId: deployment.attemptId,
+        expectedState: 'failed',
+      }).catch((cleanupError: unknown) => {
+        console.warn(
+          `[Workers] Heartbeat route cleanup failed for ${deployment.deploymentId}:`,
+          cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+        );
+      });
+    }
+
     const response: WorkerStatusResponse = {
       success: true,
       acknowledged: true,
@@ -540,19 +566,56 @@ workersRouter.get('/:id/tasks', requireWorker, async (req: Request, res: Respons
       return;
     }
 
-    // Check if any deployment assigned to this worker was cancelled and needs to be stopped
+    // Deliver cancellation cleanup through a short lease. A cancelled row must
+    // not be returned forever after a worker has acknowledged cleanup, while a
+    // crashed worker gets another chance after the lease expires.
+    const cancellationRetryBefore = new Date(Date.now() - 30_000);
     const pendingCancellation = await db
       .select()
       .from(deployments)
-      .where(and(eq(deployments.workerId, id), eq(deployments.state, 'cancelled')))
+      .where(
+        and(
+          eq(deployments.workerId, id),
+          eq(deployments.state, 'cancelled'),
+          isNull(deployments.cancelAcknowledgedAt),
+          or(
+            isNull(deployments.cancelDispatchedAt),
+            lt(deployments.cancelDispatchedAt, cancellationRetryBefore)
+          )
+        )
+      )
       .limit(1);
 
     if (pendingCancellation.length > 0) {
+      const deployment = pendingCancellation[0];
+      const dispatchedAt = new Date();
+      const claimedCancellation = await db
+        .update(deployments)
+        .set({ cancelDispatchedAt: dispatchedAt, updatedAt: dispatchedAt })
+        .where(
+          and(
+            eq(deployments.id, deployment.id),
+            eq(deployments.workerId, id),
+            eq(deployments.state, 'cancelled'),
+            isNull(deployments.cancelAcknowledgedAt),
+            or(
+              isNull(deployments.cancelDispatchedAt),
+              lt(deployments.cancelDispatchedAt, cancellationRetryBefore)
+            )
+          )
+        )
+        .returning({ id: deployments.id });
+
+      if (claimedCancellation.length === 0) {
+        res.status(200).json({ success: true, hasTask: false });
+        return;
+      }
+
       res.status(200).json({
         success: true,
         hasTask: false,
         action: 'cancel',
-        deploymentId: pendingCancellation[0].id,
+        deploymentId: deployment.id,
       });
       return;
     }

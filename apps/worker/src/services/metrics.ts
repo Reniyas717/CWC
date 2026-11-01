@@ -14,6 +14,7 @@ export class MetricsService {
   private lastCpuSnapshot: CpuSnapshot;
   private activeWorkloadIds: Set<string> = new Set();
   private currentState: WorkerState = 'idle';
+  private runtimeReady = true;
 
   constructor() {
     this.lastCpuSnapshot = this.sampleCpu();
@@ -87,7 +88,17 @@ export class MetricsService {
   }
 
   public getState(): WorkerState {
-    return this.currentState;
+    return this.runtimeReady ? this.currentState : 'error';
+  }
+
+  public setRuntimeReady(ready: boolean): void {
+    if (this.runtimeReady === ready) return;
+    this.runtimeReady = ready;
+    logger.info(`Worker runtime readiness changed: ${ready ? 'ready' : 'unavailable'}`);
+  }
+
+  public isRuntimeReady(): boolean {
+    return this.runtimeReady;
   }
 
   public setState(state: WorkerState): void {

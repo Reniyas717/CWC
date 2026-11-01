@@ -133,6 +133,11 @@ export const deployments = pgTable('deployments', {
   routingError: text('routing_error'),
   errorMessage: text('error_message'),
   retryCount: integer('retry_count').notNull().default(0),
+  // Cancellation delivery is leased so a worker crash can be retried without
+  // starving newer queued deployments. The worker acknowledges cleanup by
+  // reporting a stopped result for the cancelled assignment.
+  cancelDispatchedAt: timestamp('cancel_dispatched_at', { withTimezone: true }),
+  cancelAcknowledgedAt: timestamp('cancel_acknowledged_at', { withTimezone: true }),
   startedAt: timestamp('started_at', { withTimezone: true }),
   finishedAt: timestamp('finished_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

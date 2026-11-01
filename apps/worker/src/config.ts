@@ -15,7 +15,7 @@ export const WorkerConfigSchema = z.object({
   WORKER_ID: z.string().min(1).default('worker-node-local-01'),
   WORKER_NAME: z.string().min(1).default('Local Development Worker'),
   WORKER_PORT: z.coerce.number().int().positive().default(5001),
-  CONTROL_PLANE_URL: z.string().url().default('http://localhost:4000'),
+  CONTROL_PLANE_URL: z.string().url().default('http://100.124.251.107:4000'),
   WORKER_SECRET_TOKEN: z.string().min(8).default('dev-worker-secret-token-change-in-production'),
   MAX_CONCURRENT_WORKLOADS: z.coerce.number().int().positive().default(4),
   TOTAL_MEMORY_LIMIT_MB: z.coerce.number().int().positive().default(4096),

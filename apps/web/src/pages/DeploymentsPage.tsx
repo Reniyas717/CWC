@@ -86,6 +86,31 @@ function timeAgo(iso: string) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+function queueAge(iso: string) {
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s`;
+  const minutes = Math.floor(elapsedSeconds / 60);
+  if (minutes < 60) return `${minutes}m ${elapsedSeconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function deploymentProgressMessage(dep: Deployment) {
+  if (dep.state === 'queued') {
+    return dep.workerId
+      ? 'Assigned worker is waiting to claim this build.'
+      : 'Waiting for an eligible worker with available capacity.';
+  }
+  if (dep.state === 'building') return 'Worker is cloning the repository and building the image.';
+  if (dep.state === 'deploying') return 'Image built; worker is starting the container.';
+  if (dep.state === 'running' && dep.routingStatus === 'pending') {
+    return 'Container is running; waiting for the public route health check.';
+  }
+  if (dep.state === 'failed') return dep.errorMessage || dep.routingError || 'Deployment failed.';
+  if (dep.state === 'cancelled') return dep.errorMessage || 'Cancellation recorded; waiting for worker cleanup.';
+  return null;
+}
+
 export function DeploymentsPage() {
   const queryClient = useQueryClient();
   const [selectedLogDep, setSelectedLogDep] = React.useState<Deployment | null>(null);
@@ -165,6 +190,8 @@ export function DeploymentsPage() {
   const activeIngressCount = deployments.filter(
     (d) => d.state === 'running' && d.routingStatus === 'ready' && !!d.publicUrl
   ).length;
+  const queuedCount = deployments.filter((d) => d.state === 'queued').length;
+  const buildingCount = deployments.filter((d) => d.state === 'building' || d.state === 'deploying').length;
 
   // Filter deployments
   const filteredDeployments = React.useMemo(() => {
@@ -300,6 +327,25 @@ export function DeploymentsPage() {
           );
         })}
       </div>
+
+      {(queuedCount > 0 || buildingCount > 0) && (
+        <Card className="border-amber-500/20 bg-amber-500/5">
+          <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <Loader className="h-4 w-4 mt-0.5 text-amber-500 animate-spin shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-foreground">Deployment queue active</p>
+                <p className="text-[11px] text-muted-foreground">
+                  {queuedCount > 0 && `${queuedCount} waiting for a worker claim`}
+                  {queuedCount > 0 && buildingCount > 0 && ' · '}
+                  {buildingCount > 0 && `${buildingCount} in build or container startup`}
+                </p>
+              </div>
+            </div>
+            <span className="text-[10px] font-mono text-muted-foreground">Refreshes every 5s</span>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Animated SVG Deployment Execution Pipeline (Collapsible) */}
       {showPipeline && (
@@ -481,6 +527,16 @@ export function DeploymentsPage() {
                         </p>
                       </div>
                     </div>
+
+                    {deploymentProgressMessage(dep) && (
+                      <div className="rounded-md border border-border bg-secondary/30 px-3 py-2 text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground">Progress:</span>{' '}
+                        {deploymentProgressMessage(dep)}
+                        {(dep.state === 'queued' || dep.state === 'building' || dep.state === 'deploying') && (
+                          <span className="ml-1 font-mono">({queueAge(dep.createdAt)} elapsed)</span>
+                        )}
+                      </div>
+                    )}
 
                     {/* Degraded Ingress Banner with Direct Localhost Link and Reconnect button */}
                     {hasRouteIssue && (

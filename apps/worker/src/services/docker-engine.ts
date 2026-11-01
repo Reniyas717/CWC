@@ -1,5 +1,6 @@
 import { execFile } from 'child_process';
 import fsSync from 'fs';
+import net from 'net';
 import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
@@ -42,6 +43,7 @@ export interface DockerBuildResult {
 
 export interface DockerRunOptions {
   deploymentId: string;
+  attemptId?: string;
   imageTag: string;
   /** Validated Tailscale IPv4 address on the worker host. */
   hostIp: string;
@@ -70,6 +72,55 @@ export interface DockerRunResult {
 export interface DockerPortBinding {
   hostIp: string;
   hostPort: number;
+}
+
+interface TcpProxyHandle {
+  port: number;
+  close: () => Promise<void>;
+}
+
+export interface DockerActiveContainer {
+  deploymentId: string;
+  containerId: string;
+  hostPort: number;
+  attemptId?: string;
+}
+
+export interface StaleDockerContainer extends DockerActiveContainer {
+  reason: string;
+}
+
+interface ActiveContainer extends DockerActiveContainer {
+  proxy?: TcpProxyHandle;
+}
+
+export function isDockerContainerMissingError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such (container|object)|not found|no such id/i.test(message);
+}
+
+/**
+ * Docker Desktop can run the daemon outside the WSL network namespace. In
+ * that mode the Tailscale address exists on WSL, but Docker cannot bind it.
+ * This helper limits the fallback to that specific host-binding failure so
+ * image/build errors are not retried with a different network configuration.
+ */
+export function isDockerHostBindingError(error: unknown): boolean {
+  const details =
+    typeof error === 'object' && error !== null
+      ? (error as { message?: unknown; stderr?: unknown })
+      : undefined;
+  const message = [details?.message, details?.stderr]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+
+  return (
+    message.includes('cannot assign requested address') ||
+    message.includes('failed to bind') ||
+    message.includes('bind: address') ||
+    message.includes('address is not available')
+  );
 }
 
 /**
@@ -178,10 +229,219 @@ export function synthesizeDockerfile(
 }
 
 export class DockerEngine {
-  private activeContainers: Map<
-    string,
-    { deploymentId: string; containerId: string; hostPort: number }
-  > = new Map();
+  private dockerDesktopRuntime: boolean | undefined;
+  private activeContainers: Map<string, ActiveContainer> = new Map();
+
+  /**
+   * Verify that this worker can reach a Docker daemon before accepting work.
+   * Docker Desktop may be installed on Windows while the WSL distro running
+   * this agent still has no Docker socket, so checking the executable alone is
+   * insufficient.
+   */
+  public async checkAvailability(): Promise<{
+    available: boolean;
+    version?: string;
+    dockerDesktop?: boolean;
+    error?: string;
+  }> {
+    try {
+      const { stdout } = await execFileAsync(
+        'docker',
+        ['info', '--format', '{{.ServerVersion}}|{{.OperatingSystem}}|{{.Name}}'],
+        // Docker Desktop may need several seconds to wake its Linux daemon
+        // after WSL starts. Keep the probe bounded, but avoid marking a
+        // healthy worker unavailable during that cold-start window.
+        { timeout: 10000 }
+      );
+      const [version, ...runtimeParts] = stdout.trim().split('|');
+      if (!version) {
+        return { available: false, error: 'Docker daemon returned no server version' };
+      }
+      const runtimeDescription = runtimeParts.join('|');
+      const dockerDesktop = /docker desktop/i.test(runtimeDescription);
+      this.dockerDesktopRuntime = dockerDesktop;
+      return { available: true, version, dockerDesktop };
+    } catch (error: unknown) {
+      const details =
+        typeof error === 'object' && error !== null
+          ? (error as { message?: unknown; code?: unknown; stderr?: unknown })
+          : undefined;
+      const message =
+        typeof details?.message === 'string' ? details.message : String(error);
+      const code = details?.code !== undefined ? `code=${String(details.code)}` : undefined;
+      const stderr =
+        typeof details?.stderr === 'string' && details.stderr.trim().length > 0
+          ? `stderr=${details.stderr.trim()}`
+          : undefined;
+      return {
+        available: false,
+        error: [message, code, stderr].filter(Boolean).join('; '),
+      };
+    }
+  }
+
+  /**
+   * Bind a private TCP listener to the worker's Tailscale address and forward
+   * traffic to a Docker Desktop loopback binding. The listener is deliberately
+   * never opened on 0.0.0.0 or an IPv6 wildcard address.
+   */
+  /** @internal Exposed for the worker runtime's focused proxy lifecycle test. */
+  public async createTailscaleProxy(
+    deploymentId: string,
+    hostIp: string,
+    targetPort: number
+  ): Promise<TcpProxyHandle> {
+    const sockets = new Set<net.Socket>();
+    const server = net.createServer((client) => {
+      const upstream = net.createConnection({ host: '127.0.0.1', port: targetPort });
+      sockets.add(client);
+      sockets.add(upstream);
+      client.once('close', () => sockets.delete(client));
+      upstream.once('close', () => sockets.delete(upstream));
+
+      const closePair = () => {
+        client.destroy();
+        upstream.destroy();
+      };
+
+      client.on('error', (error) => {
+        logger.debug(`Tailscale proxy client closed for ${deploymentId}`, {
+          error: error.message,
+        });
+        upstream.destroy();
+      });
+      upstream.on('error', (error) => {
+        logger.warn(`Tailscale proxy upstream failed for ${deploymentId}`, {
+          error: error.message,
+        });
+        client.destroy();
+      });
+      client.on('close', () => upstream.destroy());
+      upstream.on('close', () => client.destroy());
+
+      client.pipe(upstream);
+      upstream.pipe(client);
+
+      // If either side has already closed before the pipe listeners are
+      // connected, release the other side immediately.
+      if (client.destroyed || upstream.destroyed) closePair();
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        reject(error);
+      };
+      server.once('error', onError);
+      server.listen({ host: hostIp, port: 0, exclusive: true }, () => {
+        server.off('error', onError);
+        resolve();
+      });
+    });
+
+    const address = server.address();
+    if (address === null || typeof address === 'string' || !Number.isInteger(address.port)) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      throw new Error(`Tailscale proxy did not expose an IPv4 port for ${deploymentId}`);
+    }
+
+    const port = address.port;
+    server.on('error', (error) => {
+      logger.error(`Tailscale proxy failed for ${deploymentId}`, { error: error.message });
+    });
+    logger.info(`Tailscale proxy listening on ${hostIp}:${port}`, {
+      deploymentId,
+      upstream: `127.0.0.1:${targetPort}`,
+    });
+
+    return {
+      port,
+      close: async () => {
+        if (!server.listening) return;
+        for (const socket of sockets) {
+          socket.destroy();
+        }
+        await new Promise<void>((resolve) => {
+          server.close(() => resolve());
+        });
+        logger.info(`Tailscale proxy closed for ${deploymentId}`, { port });
+      },
+    };
+  }
+
+  private async closeProxyFor(containerNameOrId: string): Promise<void> {
+    for (const [deploymentId, active] of this.activeContainers.entries()) {
+      if (
+        active.containerId === containerNameOrId ||
+        `cwc-${deploymentId.toLowerCase()}` === containerNameOrId
+      ) {
+        if (active.proxy) {
+          await active.proxy.close();
+          active.proxy = undefined;
+        }
+        this.activeContainers.delete(deploymentId);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Finds active containers that disappeared or stopped outside the worker.
+   * Docker daemon outages are not treated as container failures; the caller
+   * will retry on the next heartbeat once the daemon is reachable again.
+   */
+  public async reconcileActiveContainers(): Promise<StaleDockerContainer[]> {
+    const stale: StaleDockerContainer[] = [];
+
+    for (const active of Array.from(this.activeContainers.values())) {
+      try {
+        const { stdout } = await execFileAsync(
+          'docker',
+          ['inspect', '--format', '{{.State.Status}}', active.containerId],
+          { timeout: 3000 }
+        );
+        const state = stdout.trim();
+        if (state === 'running') continue;
+
+        const reason = `Docker container state is ${state || 'unknown'}`;
+        logger.error(`Active deployment container is no longer running`, {
+          deploymentId: active.deploymentId,
+          containerId: active.containerId,
+          state: state || 'unknown',
+        });
+        await this.forceRemoveContainer(active.containerId);
+        stale.push({
+          deploymentId: active.deploymentId,
+          containerId: active.containerId,
+          hostPort: active.hostPort,
+          attemptId: active.attemptId,
+          reason,
+        });
+      } catch (error: unknown) {
+        if (isDockerContainerMissingError(error)) {
+          logger.error('Active deployment container disappeared from Docker', {
+            deploymentId: active.deploymentId,
+            containerId: active.containerId,
+          });
+          await this.closeProxyFor(active.containerId);
+          stale.push({
+            deploymentId: active.deploymentId,
+            containerId: active.containerId,
+            hostPort: active.hostPort,
+            attemptId: active.attemptId,
+            reason: 'Docker container no longer exists',
+          });
+        } else {
+          logger.warn('Could not reconcile active deployment container; will retry', {
+            deploymentId: active.deploymentId,
+            containerId: active.containerId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
+    return stale;
+  }
 
   /**
    * Builds a Docker image from the checked out source code with path traversal protection.
@@ -310,6 +570,7 @@ export class DockerEngine {
   public async runContainer(options: DockerRunOptions): Promise<DockerRunResult> {
     const {
       deploymentId,
+      attemptId,
       imageTag,
       hostIp,
       targetPort,
@@ -375,11 +636,26 @@ export class DockerEngine {
       });
     }
 
-    // In local dev on Windows/WSL2 where Tailscale is simulated or on loopback,
-    // Docker Desktop cannot bind to a non-existent network adapter and leaves ports unmapped.
-    // Use 127.0.0.1 for the Docker port binding if the interface does not exist.
-    const bindHost = hasLocalInterface(hostIp) ? hostIp : '127.0.0.1';
-    const portSpec = `${bindHost}:0:${effectiveTargetPort}`;
+    if (!hasLocalInterface(hostIp)) {
+      throw new Error(
+        `Cannot start deployment ${deploymentId}: Tailscale address ${hostIp} is not assigned to this worker host`
+      );
+    }
+
+    // Native Linux Docker normally shares the host network namespace and can
+    // bind the Tailscale address directly. Docker Desktop may instead run its
+    // engine outside WSL; in that case the direct bind fails and we retry with
+    // a loopback Docker binding plus a Tailscale-only TCP proxy below.
+    let bindHost = this.dockerDesktopRuntime ? '127.0.0.1' : hostIp;
+    let useTailscaleProxy = this.dockerDesktopRuntime === true;
+
+    if (useTailscaleProxy) {
+      addLog(
+        'Docker Desktop detected; using a loopback container binding with a private Tailscale proxy',
+        'system',
+        'info'
+      );
+    }
 
     logger.info(`Launching container ${containerName}...`, {
       deploymentId,
@@ -390,51 +666,98 @@ export class DockerEngine {
       targetPort: effectiveTargetPort,
     });
 
-    // Construct run arguments with mandatory security & resource caps
-    const runArgs = [
-      'run',
-      '-d',
-      '--name',
-      containerName,
-      '-p',
-      portSpec,
-      `--memory=${memoryLimitMb}m`,
-      `--cpus=${cpuLimitCores}`,
-      '--pids-limit=256',
-      '--restart=on-failure:3',
-      '--label',
-      `cwc.deploymentId=${deploymentId}`,
-    ];
+    const createRunArgs = (requestedBindHost: string): string[] => {
+      const runArgs = [
+        'run',
+        '-d',
+        '--name',
+        containerName,
+        '-p',
+        `${requestedBindHost}:0:${effectiveTargetPort}`,
+        `--memory=${memoryLimitMb}m`,
+        `--cpus=${cpuLimitCores}`,
+        '--pids-limit=256',
+        '--restart=on-failure:3',
+        '--label',
+        `cwc.deploymentId=${deploymentId}`,
+      ];
 
-    // Append environment variables safely
-    for (const v of env) {
-      runArgs.push('-e', `${v.key}=${v.value}`);
-    }
+      for (const v of env) {
+        runArgs.push('-e', `${v.key}=${v.value}`);
+      }
+      runArgs.push(imageTag);
+      return runArgs;
+    };
 
-    runArgs.push(imageTag);
+    const launchContainer = async (requestedBindHost: string): Promise<string> => {
+      const { stdout } = await execFileAsync(
+        'docker',
+        createRunArgs(requestedBindHost),
+        { signal: options.signal }
+      );
+      return stdout.trim();
+    };
 
     let containerId: string | undefined;
     try {
-      const { stdout } = await execFileAsync('docker', runArgs, { signal: options.signal });
-      containerId = stdout.trim();
+      containerId = await launchContainer(bindHost);
       addLog(
         `Container ${containerName} started with ID ${containerId.substring(0, 12)}`,
         'system',
         'info'
       );
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      addLog(`Container start failed: ${message}`, 'stderr', 'error');
-      throw new Error(`Failed to run container ${containerName}: ${message}`, { cause: err });
+      if (useTailscaleProxy || !isDockerHostBindingError(err)) {
+        const message = err instanceof Error ? err.message : String(err);
+        addLog(`Container start failed: ${message}`, 'stderr', 'error');
+        throw new Error(`Failed to run container ${containerName}: ${message}`, { cause: err });
+      }
+
+      useTailscaleProxy = true;
+      bindHost = '127.0.0.1';
+      addLog(
+        `Docker engine cannot bind ${hostIp}; retrying on loopback with a private Tailscale proxy`,
+        'system',
+        'warn'
+      );
+      logger.warn(`Docker engine cannot bind Tailscale address for ${deploymentId}; using proxy fallback`, {
+        hostIp,
+        bindHost,
+        error: err instanceof Error ? err.message : String(err),
+      });
+
+      // Docker may have created a partial container before returning the bind
+      // error. Cleanup keeps the retry idempotent and the container name free.
+      await this.forceRemoveContainer(containerName);
+      try {
+        containerId = await launchContainer(bindHost);
+        addLog(
+          `Container ${containerName} started with loopback ID ${containerId.substring(0, 12)}`,
+          'system',
+          'info'
+        );
+      } catch (fallbackError: unknown) {
+        const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        addLog(`Loopback container start failed: ${message}`, 'stderr', 'error');
+        throw new Error(`Failed to run container ${containerName} after private proxy fallback: ${message}`, {
+          cause: fallbackError,
+        });
+      }
     }
 
     try {
       // Inspect and verify Docker's actual binding.
       const portBinding = await this.inspectPrivatePortBinding(containerId, effectiveTargetPort, bindHost);
-      const assignedPort = portBinding.hostPort;
+      const dockerPort = portBinding.hostPort;
+      const proxy = useTailscaleProxy
+        ? await this.createTailscaleProxy(deploymentId, hostIp, dockerPort)
+        : undefined;
+      const assignedPort = proxy?.port ?? dockerPort;
       const publicUrl = `http://${hostIp}:${assignedPort}`;
       addLog(
-        `Container port ${effectiveTargetPort} mapped privately to ${hostIp}:${assignedPort}`,
+        useTailscaleProxy
+          ? `Container port ${effectiveTargetPort} mapped to 127.0.0.1:${dockerPort} and proxied privately to ${hostIp}:${assignedPort}`
+          : `Container port ${effectiveTargetPort} mapped privately to ${hostIp}:${assignedPort}`,
         'system',
         'info'
       );
@@ -452,10 +775,18 @@ export class DockerEngine {
         deploymentId,
         containerId,
         hostPort: assignedPort,
+        attemptId,
+        proxy,
       });
 
       // Health verification
-      await this.verifyHealth(containerId, bindHost, assignedPort, healthCheckPath, addLog);
+      await this.verifyHealth(
+        containerId,
+        proxy ? hostIp : bindHost,
+        assignedPort,
+        healthCheckPath,
+        addLog
+      );
 
       return {
         containerId,
@@ -686,10 +1017,18 @@ export class DockerEngine {
    * Forcefully stops and removes a container by name or ID.
    */
   public async forceRemoveContainer(containerNameOrId: string): Promise<void> {
+    await this.closeProxyFor(containerNameOrId);
     try {
       await execFileAsync('docker', ['rm', '-f', containerNameOrId]);
-    } catch {
-      // Container may not exist, ignore
+      logger.info(`Force-removed container ${containerNameOrId}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/no such container|not found/i.test(message)) {
+        // Cancellation and startup reconciliation are intentionally idempotent.
+        logger.debug(`Container ${containerNameOrId} was already absent during cleanup`);
+      } else {
+        logger.warn(`Failed to force-remove container ${containerNameOrId}`, { error: message });
+      }
     }
   }
 
@@ -738,7 +1077,10 @@ export class DockerEngine {
         }
       }
       return cleaned;
-    } catch {
+    } catch (error: unknown) {
+      logger.warn('Could not reconcile existing deployment containers', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }

@@ -22,6 +22,13 @@ export class DeploymentRunner {
   private activeDeployments: Set<string> = new Set();
   private activeAttemptIds: Map<string, string | undefined> = new Map();
   private inProgressControllers: Map<string, AbortController> = new Map();
+  private pendingRuntimeFailures: Map<string, {
+    deploymentId: string;
+    containerId: string;
+    assignedPort: number;
+    attemptId?: string;
+    reason: string;
+  }> = new Map();
 
   constructor(
     gitRunner: GitRunner,
@@ -37,6 +44,58 @@ export class DeploymentRunner {
 
   public isDeploymentActive(deploymentId: string): boolean {
     return this.activeDeployments.has(deploymentId);
+  }
+
+  /**
+   * Detect containers removed outside the worker and tell the control plane so
+   * it can remove stale routes. Failed reports remain in
+   * memory for the next heartbeat if the control plane is temporarily down.
+   */
+  public async reconcileActiveDeployments(): Promise<void> {
+    const staleContainers = await this.dockerEngine.reconcileActiveContainers();
+
+    for (const stale of staleContainers) {
+      const controller = this.inProgressControllers.get(stale.deploymentId);
+      controller?.abort();
+      this.activeDeployments.delete(stale.deploymentId);
+      this.inProgressControllers.delete(stale.deploymentId);
+      this.activeAttemptIds.delete(stale.deploymentId);
+      this.metricsService.unregisterWorkload(stale.deploymentId);
+      this.pendingRuntimeFailures.set(stale.deploymentId, {
+        ...stale,
+        assignedPort: stale.hostPort,
+      });
+    }
+
+    for (const failure of this.pendingRuntimeFailures.values()) {
+      try {
+        const response = await this.controlPlaneClient.reportResult({
+          deploymentId: failure.deploymentId,
+          workerId: workerConfig.WORKER_ID,
+          attemptId: failure.attemptId,
+          state: 'failed',
+          containerId: failure.containerId,
+          assignedPort: failure.assignedPort,
+          errorMessage: `Managed container disappeared or stopped: ${failure.reason}`,
+        });
+
+        if (response.ok || response.statusCode === 409) {
+          logger.warn(`Reported stale container failure for ${failure.deploymentId}`, {
+            containerId: failure.containerId,
+            statusCode: response.statusCode,
+          });
+          this.pendingRuntimeFailures.delete(failure.deploymentId);
+        } else {
+          logger.warn(`Could not report stale container failure for ${failure.deploymentId}; will retry`, {
+            error: response.error || `HTTP ${response.statusCode}`,
+          });
+        }
+      } catch (error: unknown) {
+        logger.warn(`Could not report stale container failure for ${failure.deploymentId}; will retry`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /**
@@ -144,6 +203,7 @@ export class DeploymentRunner {
       );
       const runResult = await this.dockerEngine.runContainer({
         deploymentId,
+        attemptId: task.attemptId,
         imageTag,
         hostIp: tailscaleAddress,
         targetPort: task.targetPort,
@@ -251,7 +311,7 @@ export class DeploymentRunner {
   /**
    * Stops an active deployment, aborts in-progress build/run, and cleans up its container.
    */
-  public async stopDeployment(deploymentId: string): Promise<void> {
+  public async stopDeployment(deploymentId: string): Promise<boolean> {
     logger.info(`Stopping deployment ${deploymentId}...`);
 
     // Abort in-progress Git clone or Docker build if currently executing
@@ -268,14 +328,28 @@ export class DeploymentRunner {
     this.inProgressControllers.delete(deploymentId);
 
     try {
-      await this.controlPlaneClient.reportResult({
+      const response = await this.controlPlaneClient.reportResult({
         deploymentId,
         workerId: workerConfig.WORKER_ID,
         attemptId: this.activeAttemptIds.get(deploymentId),
         state: 'stopped',
       });
+      if (response.ok) {
+        logger.info(`Cancellation acknowledged by Control Plane for ${deploymentId}`);
+        return true;
+      } else if (response.statusCode === 409) {
+        logger.info(`Cancellation cleanup already finalized or stale for ${deploymentId}`);
+        return true;
+      } else {
+        logger.warn(
+          `Cancellation acknowledgement failed for ${deploymentId}: ${response.error || `HTTP ${response.statusCode}`}`
+        );
+      }
     } catch {
-      // Ignore API transmission errors during stop
+      logger.warn(`Cancellation acknowledgement could not reach Control Plane for ${deploymentId}`);
+      return false;
     }
+
+    return false;
   }
 }

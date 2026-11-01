@@ -56,6 +56,14 @@ function WorkerStatusBadge({ state }: { state: WorkerNode['state'] }) {
       </Badge>
     );
   }
+  if (state === 'error') {
+    return (
+      <Badge variant="destructive" className="flex items-center gap-1.5">
+        <AlertTriangle className="h-3 w-3" />
+        Runtime Error
+      </Badge>
+    );
+  }
   return <Badge variant="secondary">{state}</Badge>;
 }
 
@@ -382,6 +390,16 @@ export function WorkersPage() {
               const isWarning = secondsAgo >= 15 && secondsAgo < 30 && worker.state !== 'offline';
               const leaseStatus =
                 worker.state !== 'offline' && secondsAgo < 30 ? 'active' : 'expired';
+              const runtimeReadiness =
+                worker.state === 'idle'
+                  ? 'Ready for workloads'
+                  : worker.state === 'busy'
+                    ? 'Runtime active'
+                    : worker.state === 'error'
+                      ? 'Runtime unavailable'
+                      : worker.state === 'offline'
+                        ? 'No heartbeat'
+                        : 'Draining workloads';
 
               return (
                 <Card key={worker.id} className="transition-all hover:border-foreground/20">
@@ -448,6 +466,25 @@ export function WorkersPage() {
                           </Button>
                         )}
                       </div>
+                    </div>
+
+                    <div
+                      className={`rounded-md border px-3 py-2 text-[11px] flex items-center justify-between gap-3 ${
+                        worker.state === 'error' || worker.state === 'offline'
+                          ? 'border-destructive/20 bg-destructive/5'
+                          : 'border-emerald-500/20 bg-emerald-500/5'
+                      }`}
+                    >
+                      <span className="text-muted-foreground">
+                        Runtime readiness: <strong className="text-foreground">{runtimeReadiness}</strong>
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {worker.state === 'error'
+                          ? 'Worker reported a runtime failure'
+                          : worker.state === 'offline'
+                            ? 'Waiting for heartbeat'
+                            : 'Based on latest worker heartbeat'}
+                      </span>
                     </div>
 
                     {/* Telemetry Metrics Grid */}

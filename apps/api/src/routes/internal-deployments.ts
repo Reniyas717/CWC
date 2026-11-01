@@ -55,6 +55,42 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
         return { kind: 'not-found' as const };
       }
 
+      // Cancellation cleanup is an idempotent acknowledgement. The deployment
+      // remains cancelled, but the acknowledgement releases the cancellation
+      // lease so it no longer starves queued work. Do not require an attempt ID
+      // here: a worker can restart after receiving the stop directive and still
+      // safely acknowledge cleanup by worker identity.
+      if (
+        currentDep.state === 'cancelled' &&
+        payload.state === 'stopped' &&
+        payload.workerId === currentDep.workerId
+      ) {
+        const acknowledged = await tx
+          .update(deployments)
+          .set({
+            cancelAcknowledgedAt: currentDep.cancelAcknowledgedAt ?? now,
+            cancelDispatchedAt: currentDep.cancelDispatchedAt ?? now,
+            updatedAt: now,
+          })
+          .where(eq(deployments.id, id))
+          .returning({ id: deployments.id });
+
+        if (acknowledged.length > 0 && !currentDep.cancelAcknowledgedAt) {
+          await tx.insert(deploymentEvents).values({
+            deploymentId: id,
+            eventType: 'CANCEL_ACKNOWLEDGED',
+            details: `Worker ${payload.workerId} acknowledged cancellation cleanup`,
+            timestamp: now,
+          });
+        }
+
+        return {
+          kind: 'cancellation-ack' as const,
+          state: currentDep.state,
+          workerId: currentDep.workerId,
+        };
+      }
+
       // A result is valid only for the worker and assignment currently stored
       // on the deployment. An absent attempt id is accepted only for legacy
       // rows that have not been claimed yet; claimed rows always require it.
@@ -104,7 +140,11 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
           // Worker reports historically called this field publicUrl. It is
           // private and must never be returned as the platform URL.
           workerUrl: payload.workerUrl ?? payload.publicUrl ?? currentDep.workerUrl,
-          publicUrl: payload.state === 'running' ? null : currentDep.publicUrl,
+          // A terminal worker report invalidates the public URL immediately.
+          // Gateway deletion runs asynchronously (and is retried by the
+          // sweeper), so the API must not advertise a route backed by a
+          // container that has already disappeared.
+          publicUrl: null,
           routingStatus: payload.state === 'running' ? 'pending' : 'failed',
           routingError:
             payload.state === 'running'
@@ -195,6 +235,17 @@ internalDeploymentsRouter.post('/:id/result', async (req: Request, res: Response
           message:
             'Deployment result belongs to an obsolete worker assignment or cancelled deployment',
         },
+      });
+      return;
+    }
+
+    if (outcome.kind === 'cancellation-ack') {
+      res.status(200).json({
+        success: true,
+        acknowledged: true,
+        cancellationAcknowledged: true,
+        deploymentId: id,
+        state: outcome.state,
       });
       return;
     }
