@@ -181,7 +181,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
     }
 
     if (!repoUrl.trim()) {
-      setErrorMsg('Public Git repository URL is required.');
+      setErrorMsg('Git repository URL is required.');
       return;
     }
 
@@ -364,7 +364,7 @@ export function NewApplicationModal({ isOpen, onClose }: NewApplicationModalProp
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
                       <GitBranch className="h-3 w-3 text-muted-foreground" />
-                      Public Git Repository URL
+                      Git Repository URL
                     </label>
                     <Input
                       placeholder="https://github.com/organization/repo.git"
