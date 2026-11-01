@@ -439,25 +439,54 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
   const now = new Date();
 
   try {
-    // Check if worker exists
+    const peerAddress = getTailscalePeerAddress(req);
+    if (!peerAddress) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'TAILSCALE_ADDRESS_REQUIRED',
+          message: 'Heartbeat requests must come from a Tailscale IPv4 address',
+        },
+      });
+      return;
+    }
+
+    // First heartbeat can enroll a node when it arrives over Tailscale and
+    // authenticates with the configured worker secret. Registration remains
+    // the richer path for supplying a friendly name, port, and resource caps.
     const existing = await db
       .select({ id: workerNodes.id, ipAddress: workerNodes.ipAddress })
       .from(workerNodes)
       .where(eq(workerNodes.id, payload.workerId));
 
     if (existing.length === 0) {
-      res.status(404).json({
-        success: false,
-        error: {
-          code: 'WORKER_NOT_REGISTERED',
-          message: `Worker '${payload.workerId}' is not registered. Please register first.`,
-        },
-      });
-      return;
+      await db.insert(workerNodes).values({
+        id: payload.workerId,
+        name: payload.workerId,
+        hostname: payload.workerId,
+        ipAddress: peerAddress,
+        port: 5001,
+        state: payload.state,
+        cpuCores: payload.resources.cpuCount,
+        cpuUsagePercent: payload.resources.cpuUsagePercent,
+        totalMemoryMb: payload.resources.totalMemoryMb,
+        freeMemoryMb: payload.resources.freeMemoryMb,
+        usedMemoryMb: payload.resources.usedMemoryMb,
+        maxConcurrentWorkloads: 1,
+        activeContainers: payload.resources.activeContainers,
+        version: '0.1.0',
+        registeredAt: now,
+        lastHeartbeatAt: now,
+      }).onConflictDoNothing();
     }
 
-    const peerAddress = getTailscalePeerAddress(req);
-    if (peerAddress && peerAddress !== existing[0].ipAddress) {
+    // Re-read after insert to handle concurrent first heartbeats safely: a
+    // conflicting insert must not let a different Tailscale peer claim an ID.
+    const persistedWorker = await db
+      .select({ ipAddress: workerNodes.ipAddress })
+      .from(workerNodes)
+      .where(eq(workerNodes.id, payload.workerId));
+    if (persistedWorker.length === 0 || peerAddress !== persistedWorker[0].ipAddress) {
       rejectWorkerIdentityMismatch(res, payload.workerId);
       return;
     }
