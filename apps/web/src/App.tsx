@@ -8,6 +8,7 @@ import { DeploymentsPage } from './pages/DeploymentsPage';
 import { EqualizerPage } from './pages/EqualizerPage';
 import { LogsPage } from './pages/LogsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +30,7 @@ export function App() {
             <Route path="workers" element={<WorkersPage />} />
             <Route path="deployments" element={<DeploymentsPage />} />
             <Route path="equalizer" element={<EqualizerPage />} />
+            <Route path="analytics" element={<AnalyticsPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />

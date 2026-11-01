@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   Scale,
   Zap,
+  BarChart3,
 } from 'lucide-react';
 import { Deployment } from '@cloud-without-clouds/shared';
 import { api, WorkerScoreBreakdown } from '@/services/api';
@@ -166,6 +167,15 @@ export function DashboardPage() {
             <Zap className="h-3.5 w-3.5" />
             <span>Failover Chaos Drill</span>
           </Button>
+          <NavLink to="/analytics">
+            <Button
+              variant="outline"
+              className="h-9 px-3 text-xs font-semibold flex items-center gap-1.5 cursor-pointer text-emerald-600 dark:text-emerald-400"
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              <span>Deep Analytics</span>
+            </Button>
+          </NavLink>
           <NavLink to="/equalizer">
             <Button
               variant="outline"

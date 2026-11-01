@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Workflow,
   Scale,
+  BarChart3,
 } from 'lucide-react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { api } from '@/services/api';
@@ -29,7 +30,10 @@ interface NavItem {
 const NAV_GROUPS: { group: string; items: NavItem[] }[] = [
   {
     group: 'Platform',
-    items: [{ label: 'Dashboard', path: '/', icon: LayoutDashboard }],
+    items: [
+      { label: 'Dashboard', path: '/', icon: LayoutDashboard },
+      { label: 'Cluster Analytics', path: '/analytics', icon: BarChart3 },
+    ],
   },
   {
     group: 'Compute',
@@ -90,6 +94,8 @@ export function AppLayout() {
     switch (location.pathname) {
       case '/':
         return 'Overview';
+      case '/analytics':
+        return 'Cluster Analytics Fabric';
       case '/apps':
         return 'Applications';
       case '/workers':

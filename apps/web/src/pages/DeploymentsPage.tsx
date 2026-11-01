@@ -13,6 +13,9 @@ import {
   Search,
   Filter,
   X,
+  RefreshCw,
+  SlidersHorizontal,
+  Radio,
 } from 'lucide-react';
 import { Deployment } from '@cloud-without-clouds/shared';
 import { api } from '@/services/api';
@@ -73,31 +76,6 @@ function DeploymentStateBadge({ state }: { state: Deployment['state'] }) {
   );
 }
 
-function RoutingStatusBadge({ deployment }: { deployment: Deployment }) {
-  if (deployment.routingStatus === 'ready' && deployment.publicUrl) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        Public route ready
-      </span>
-    );
-  }
-  if (deployment.routingStatus === 'failed') {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-destructive">
-        <AlertCircle className="h-3 w-3" />
-        Route failed{deployment.routingError ? `: ${deployment.routingError}` : ''}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-      <Loader className="h-3 w-3 animate-spin" />
-      Publishing public routeâ€¦
-    </span>
-  );
-}
-
 function timeAgo(iso: string) {
   const ms = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(ms / 60000);
@@ -115,6 +93,12 @@ export function DeploymentsPage() {
   const [stateFilter, setStateFilter] = React.useState<string>('all');
   const [currentPage, setCurrentPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(5);
+  const [showPipeline, setShowPipeline] = React.useState<boolean>(true);
+  const [repairingId, setRepairingId] = React.useState<string | null>(null);
+  const [routeNotice, setRouteNotice] = React.useState<{
+    text: string;
+    type: 'success' | 'warn';
+  } | null>(null);
 
   const {
     data: deployments = [],
@@ -132,6 +116,47 @@ export function DeploymentsPage() {
     mutationFn: (id: string) => api.cancelDeployment(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['deployments'] });
+    },
+  });
+
+  const repairRouteMutation = useMutation({
+    mutationFn: (id: string) => api.repairDeploymentRoute(id),
+    onMutate: (id) => setRepairingId(id),
+    onSuccess: (dep) => {
+      setRepairingId(null);
+      setRouteNotice({
+        text: `Ingress route re-established: ${dep.publicUrl || 'ready'}`,
+        type: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      setTimeout(() => setRouteNotice(null), 5000);
+    },
+    onError: (err: Error) => {
+      setRepairingId(null);
+      setRouteNotice({
+        text: `Gateway route repair: ${err.message}`,
+        type: 'warn',
+      });
+      setTimeout(() => setRouteNotice(null), 6000);
+    },
+  });
+
+  const syncIngressMutation = useMutation({
+    mutationFn: () => api.reconcileGatewayIngress(),
+    onSuccess: (result) => {
+      setRouteNotice({
+        text: `Gateway sync complete: ${result.publishedRoutes} routes verified online.`,
+        type: 'success',
+      });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      setTimeout(() => setRouteNotice(null), 4000);
+    },
+    onError: (err: Error) => {
+      setRouteNotice({
+        text: `Gateway sync check: ${err.message}`,
+        type: 'warn',
+      });
+      setTimeout(() => setRouteNotice(null), 5000);
     },
   });
 
@@ -176,19 +201,68 @@ export function DeploymentsPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="space-y-1">
-        <h1
-          className="text-2xl font-bold tracking-tight text-foreground"
-          style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
-        >
-          Deployments
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Live build logs, worker container lifecycle, and dynamic edge route assignments.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1
+            className="text-2xl font-bold tracking-tight text-foreground"
+            style={{ fontFamily: 'var(--font-heading, var(--font-sans))' }}
+          >
+            Deployments
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Live build logs, worker container lifecycle, and dynamic edge route assignments.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowPipeline((prev) => !prev)}
+            className="h-8.5 text-xs flex items-center gap-1.5 cursor-pointer font-medium"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span>{showPipeline ? 'Hide Architecture' : 'Show Architecture'}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => syncIngressMutation.mutate()}
+            disabled={syncIngressMutation.isPending}
+            className="h-8.5 text-xs flex items-center gap-1.5 cursor-pointer font-medium"
+            title="Re-synchronize Caddy and Cloudflare tunnels with database"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${syncIngressMutation.isPending ? 'animate-spin' : ''}`}
+            />
+            <span>{syncIngressMutation.isPending ? 'Syncing...' : 'Sync Ingress'}</span>
+          </Button>
+        </div>
       </div>
+
+      {routeNotice && (
+        <div
+          className={`p-3 rounded-md text-xs flex items-center justify-between gap-2 border ${
+            routeNotice.type === 'success'
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+              : 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Radio className="h-3.5 w-3.5 shrink-0 animate-pulse" />
+            <span>{routeNotice.text}</span>
+          </div>
+          <button
+            onClick={() => setRouteNotice(null)}
+            className="text-muted-foreground hover:text-foreground p-0.5"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {isError && <DataError error={error} onRetry={() => void refetch()} />}
 
@@ -211,27 +285,37 @@ export function DeploymentsPage() {
           const Icon = m.icon;
           return (
             <Card key={m.label}>
-              <CardContent className="p-5">
-                <div className="flex items-start justify-between mb-4">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between mb-3">
                   <p className="text-xs font-medium text-muted-foreground">{m.label}</p>
                   <div className="h-7 w-7 rounded-md bg-secondary flex items-center justify-center shrink-0">
                     <Icon className="h-3.5 w-3.5 text-muted-foreground" />
                   </div>
                 </div>
-                <span className="text-2xl font-bold text-foreground tracking-tight">{m.value}</span>
+                <span className="text-2xl font-bold font-mono text-foreground tracking-tight">
+                  {m.value}
+                </span>
               </CardContent>
             </Card>
           );
         })}
       </div>
 
-      {/* Animated SVG Deployment Execution Pipeline */}
-      <div className="rounded-md border border-border bg-card p-4 space-y-2">
-        <AnimatedPipeline
-          currentStage={runningCount > 0 ? 'ingress' : 'git'}
-          status={failedCount > 0 ? 'failed' : runningCount > 0 ? 'running' : 'idle'}
-        />
-      </div>
+      {/* Animated SVG Deployment Execution Pipeline (Collapsible) */}
+      {showPipeline && (
+        <div className="rounded-md border border-border bg-card p-4 space-y-2">
+          <AnimatedPipeline
+            currentStage={runningCount > 0 ? 'ingress' : 'git'}
+            status={
+              failedCount > 0 && runningCount === 0
+                ? 'failed'
+                : runningCount > 0
+                  ? 'running'
+                  : 'idle'
+            }
+          />
+        </div>
+      )}
 
       {/* Search & Filter Bar */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
@@ -336,10 +420,12 @@ export function DeploymentsPage() {
               const isTerminal =
                 dep.state === 'stopped' || dep.state === 'failed' || dep.state === 'cancelled';
               const isCancelling = cancelMutation.isPending && cancelMutation.variables === dep.id;
+              const isRepairing = repairingId === dep.id;
+              const hasRouteIssue = dep.state === 'running' && dep.routingStatus === 'failed';
 
               return (
                 <Card key={dep.id} className="hover:border-foreground/20 transition-all">
-                  <CardHeader className="p-5 pb-3">
+                  <CardHeader className="p-4 pb-2">
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div className="space-y-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -357,9 +443,9 @@ export function DeploymentsPage() {
                           <span className="bg-secondary px-1.5 py-0.2 rounded">
                             {dep.gitCommitHash || 'head'}
                           </span>
-                          <span>â€¢</span>
+                          <span>•</span>
                           <span>v{dep.version}</span>
-                          <span>â€¢</span>
+                          <span>•</span>
                           <span>{timeAgo(dep.createdAt)}</span>
                         </div>
                       </div>
@@ -368,7 +454,7 @@ export function DeploymentsPage() {
                       </div>
                     </div>
                   </CardHeader>
-                  <CardContent className="px-5 pb-5 space-y-3">
+                  <CardContent className="px-4 pb-4 space-y-3">
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-[11px]">
                       <div className="space-y-0.5">
                         <span className="text-muted-foreground uppercase tracking-wide font-medium text-[10px]">
@@ -396,22 +482,71 @@ export function DeploymentsPage() {
                       </div>
                     </div>
 
+                    {/* Degraded Ingress Banner with Direct Localhost Link and Reconnect button */}
+                    {hasRouteIssue && (
+                      <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-600 dark:text-amber-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-1.5 font-medium">
+                            <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span>Public Route Offline (Gateway Restarted)</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground font-mono">
+                            Docker container is active. Test locally:{' '}
+                            <a
+                              href={`http://localhost:${dep.assignedPort}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="underline text-foreground inline-flex items-center gap-0.5 font-bold"
+                            >
+                              http://localhost:{dep.assignedPort}
+                              <ExternalLink className="h-2.5 w-2.5" />
+                            </a>
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => repairRouteMutation.mutate(dep.id)}
+                          disabled={isRepairing}
+                          className="h-7 text-xs flex items-center gap-1 cursor-pointer shrink-0 font-semibold"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${isRepairing ? 'animate-spin' : ''}`} />
+                          <span>{isRepairing ? 'Reconnecting...' : 'Reconnect Public Route'}</span>
+                        </Button>
+                      </div>
+                    )}
+
                     {/* Public URL and Row Actions */}
-                    <div className="pt-3 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="space-y-1 min-w-0">
+                    <div className="pt-2 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5 min-w-0">
                         {dep.routingStatus === 'ready' && dep.publicUrl ? (
-                          <a
-                            href={dep.publicUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs font-mono text-foreground hover:underline"
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>{dep.publicUrl}</span>
-                            <ExternalLink className="h-3 w-3 opacity-60" />
-                          </a>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <a
+                              href={dep.publicUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              <span>{dep.publicUrl}</span>
+                              <ExternalLink className="h-3 w-3 opacity-60" />
+                            </a>
+                            <span className="text-[10px] font-mono text-muted-foreground">
+                              (Port :{dep.assignedPort})
+                            </span>
+                          </div>
+                        ) : !hasRouteIssue ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {dep.state === 'running' ? (
+                              <>
+                                <Loader className="h-3 w-3 animate-spin text-amber-500" />
+                                <span>Publishing public route...</span>
+                              </>
+                            ) : (
+                              <span>Route offline ({dep.state})</span>
+                            )}
+                          </div>
                         ) : null}
-                        <RoutingStatusBadge deployment={dep} />
                       </div>
 
                       {/* Action Buttons: View Logs & Cancel */}
@@ -420,10 +555,10 @@ export function DeploymentsPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => setSelectedLogDep(dep)}
-                          className="h-7.5 px-2.5 text-xs flex items-center gap-1.5"
+                          className="h-7 px-2.5 text-xs flex items-center gap-1.5 cursor-pointer font-medium"
                         >
                           <Terminal className="h-3 w-3" />
-                          <span>View Logs</span>
+                          <span>Logs</span>
                         </Button>
 
                         {!isTerminal && (
@@ -432,7 +567,7 @@ export function DeploymentsPage() {
                             size="sm"
                             onClick={() => cancelMutation.mutate(dep.id)}
                             disabled={isCancelling}
-                            className="h-7.5 px-2.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            className="h-7 px-2.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                           >
                             <StopCircle className="h-3 w-3" />
                             <span>{isCancelling ? 'Cancelling...' : 'Cancel'}</span>
