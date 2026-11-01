@@ -337,12 +337,21 @@ const tunnelChild = new (class extends EventTarget {
     this.dispatchEvent(new CustomEvent('exit', { detail: 0 }));
   }
 })();
-const quickTunnel = new QuickTunnel(() => tunnelChild);
-const tunnelPromise = quickTunnel.start(19002);
+let publicProbeAttempts = 0;
+const quickTunnel = new QuickTunnel(() => tunnelChild, {
+  probe: async (url) => {
+    assert.equal(url, 'https://brisk-moon.trycloudflare.com/ready');
+    publicProbeAttempts += 1;
+    return publicProbeAttempts < 3 ? { ok: false, status: 530 } : { ok: true, status: 200 };
+  },
+  retryIntervalMs: 1,
+});
+const tunnelPromise = quickTunnel.start(19002, { readinessPath: '/ready' });
 tunnelErrors.write('diagnostic output\n');
 tunnelOutput.write('INF https://brisk-moon.trycloudflare.com\n');
 const quickTunnelResult = await tunnelPromise;
 assert.equal(quickTunnelResult.url, 'https://brisk-moon.trycloudflare.com');
+assert.equal(publicProbeAttempts, 3);
 quickTunnelResult.stop();
 
 server.close();

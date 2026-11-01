@@ -233,11 +233,17 @@ export class CaddyAdminClient {
 }
 
 export class QuickTunnel {
-  constructor(spawnImpl = spawn) {
+  constructor(
+    spawnImpl = spawn,
+    { probe = fetch, readinessTimeoutMs = 30000, retryIntervalMs = 1000 } = {}
+  ) {
     this.spawn = spawnImpl;
+    this.probe = probe;
+    this.readinessTimeoutMs = readinessTimeoutMs;
+    this.retryIntervalMs = retryIntervalMs;
   }
 
-  async start(listenerPort, { onExit } = {}) {
+  async start(listenerPort, { onExit, readinessPath = '/' } = {}) {
     let child;
     let command = 'cloudflared';
     let options = { stdio: ['ignore', 'pipe', 'pipe'] };
@@ -266,26 +272,48 @@ export class QuickTunnel {
     return new Promise((resolve, reject) => {
       let buffer = '';
       let settled = false;
+      let publicUrlSeen = false;
+      let readinessCheckStarted = false;
+      const stop = () => {
+        stopped = true;
+        if (process.platform === 'win32' && child?.pid) {
+          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+        }
+        child?.kill?.('SIGTERM');
+      };
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
         callback(value);
       };
+      const confirmPublicReadiness = async (url) => {
+        if (readinessCheckStarted) return;
+        readinessCheckStarted = true;
+        const target = new URL(readinessPath, url).toString();
+        const deadline = Date.now() + this.readinessTimeoutMs;
+        while (!settled && Date.now() < deadline) {
+          try {
+            const response = await this.probe(target, {
+              signal: AbortSignal.timeout(Math.min(5000, this.readinessTimeoutMs)),
+            });
+            if (response.ok) {
+              finish(resolve, { url, stop });
+              return;
+            }
+          } catch {
+            // Quick Tunnel DNS and edge connections can take a few seconds to come up.
+          }
+          await new Promise((done) => setTimeout(done, this.retryIntervalMs));
+        }
+      };
       const onData = (chunk) => {
         buffer = `${buffer}${chunk.toString()}`.slice(-4096);
         const match = buffer.match(/https:\/\/(?!api\.)[-a-z0-9]+\.trycloudflare\.com/i);
-        if (match)
-          finish(resolve, {
-            url: match[0],
-            stop: () => {
-              stopped = true;
-              if (process.platform === 'win32' && child?.pid) {
-                spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-              }
-              child?.kill?.('SIGTERM');
-            },
-          });
+        if (match) {
+          publicUrlSeen = true;
+          void confirmPublicReadiness(match[0]);
+        }
       };
       const onError = (error) =>
         finish(
@@ -307,20 +335,18 @@ export class QuickTunnel {
         }
       };
       const timeout = setTimeout(() => {
-        stopped = true;
-        if (process.platform === 'win32' && child?.pid) {
-          spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-        }
-        child?.kill?.('SIGTERM');
+        stop();
         finish(
           reject,
           new GatewayError(
             502,
             'TUNNEL_START_FAILED',
-            'cloudflared did not provide a public URL within 15 seconds'
+            publicUrlSeen
+              ? 'cloudflared URL did not become publicly reachable within 30 seconds'
+              : 'cloudflared did not provide a public URL within 15 seconds'
           )
         );
-      }, 15000);
+      }, this.readinessTimeoutMs + 15000);
       child.stdout?.on('data', onData);
       child.stderr?.on('data', onData);
       child.once('error', onError);
@@ -417,6 +443,7 @@ export class RouteManager {
     try {
       tunnel = await this.tunnel.start(listenerPort, {
         onExit: () => this.#scheduleRestart(route.deploymentId, activeRecord),
+        readinessPath: route.healthPath,
       });
     } catch (error) {
       if (previous) await this.caddy.apply(previous).catch(() => {});
@@ -444,6 +471,7 @@ export class RouteManager {
     try {
       const tunnel = await this.tunnel.start(record.listenerPort, {
         onExit: () => this.#scheduleRestart(deploymentId, record),
+        readinessPath: record.healthPath,
       });
       if (record.cancelled || this.routes.get(deploymentId) !== record) {
         tunnel.stop();
