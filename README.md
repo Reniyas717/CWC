@@ -8,6 +8,10 @@
 
 A distributed, self-service application hosting platform that enables developers to deploy applications from Git repositories onto a network of developer-owned computers (laptops and desktops).
 
+## Video Demo
+
+https://drive.google.com/file/d/1_TShE6v-sk74qxO_cKtbilCUNWZ9rv30/view?usp=sharing
+
 ## 🚀 Overview
 
 Instead of renting costly hyperscaler virtual machines, **Cloud Without Clouds** leverages idle compute capacity across personal computers. Developers deploy containerized web services and applications, while computer owners configure resource quotas, monitor CPU/memory usage, and safely isolate workloads.
@@ -215,3 +219,6 @@ pnpm dev
    - Private Git repository SSH keys / OAuth integrations.
    - Custom DNS registrar automation.
    - Paid cloud virtual machines.
+
+
+GGS
