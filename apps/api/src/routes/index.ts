@@ -12,6 +12,8 @@ export const apiRouter: Router = Router();
 // Mount root health check
 apiRouter.use(healthRouter);
 apiRouter.use('/api/auth', authRouter);
+apiRouter.use('/api/v1/auth', authRouter);
+apiRouter.use('/auth', authRouter);
 
 // Mount modular feature routes under /api/v1
 apiRouter.use('/api/v1/workers', workersRouter);

@@ -121,13 +121,28 @@ export function AnimatedPipeline({
   status = 'running',
   className = '',
 }: AnimatedPipelineProps) {
-  const [selectedStage, setSelectedStage] = React.useState<StageInfo>(PIPELINE_STAGES[3]);
-  const [activeSimulation, setActiveSimulation] = React.useState<boolean>(false);
-  const [simulatedStep, setSimulatedStep] = React.useState<number>(5);
-
   const getStageIndex = (key: PipelineStageKey) => PIPELINE_STAGES.findIndex((s) => s.id === key);
 
-  const activeIndex = activeSimulation ? simulatedStep : getStageIndex(currentStage);
+  const [selectedStage, setSelectedStage] = React.useState<StageInfo>(() => {
+    const idx = getStageIndex(currentStage);
+    return idx >= 0 ? PIPELINE_STAGES[idx] : PIPELINE_STAGES[2];
+  });
+  const [activeSimulation, setActiveSimulation] = React.useState<boolean>(false);
+  const [simulatedStep, setSimulatedStep] = React.useState<number>(2);
+
+  // Active step index controlled by user clicks or simulation
+  const [userStep, setUserStep] = React.useState<number>(() => {
+    const idx = getStageIndex(currentStage);
+    return idx >= 0 ? idx : 2;
+  });
+
+  const activeIndex = activeSimulation ? simulatedStep : userStep;
+
+  const handleStageClick = (stage: StageInfo, idx: number) => {
+    setActiveSimulation(false);
+    setSelectedStage(stage);
+    setUserStep(idx);
+  };
 
   const triggerLiveTour = () => {
     setActiveSimulation(true);
@@ -183,100 +198,98 @@ export function AnimatedPipeline({
       </div>
 
       {/* SVG Pipeline Canvas */}
-      <div className="relative overflow-x-auto py-4 px-2">
-        <div className="min-w-[700px] flex items-center justify-between relative">
-          {/* Animated SVG Connecting Flow Line */}
-          <svg
-            className="absolute top-1/2 left-0 w-full h-8 -translate-y-1/2 pointer-events-none z-0"
-            preserveAspectRatio="none"
-          >
-            {/* Background Track Line */}
-            <line
-              x1="5%"
-              y1="50%"
-              x2="95%"
-              y2="50%"
-              stroke="currentColor"
-              className="text-border"
-              strokeWidth="2"
-              strokeDasharray="4 4"
-            />
-            {/* Active Moving Particle Stream */}
-            <line
-              x1="5%"
-              y1="50%"
-              x2={`${Math.min(100, Math.max(10, ((activeIndex + 1) / PIPELINE_STAGES.length) * 100))}%`}
-              y2="50%"
-              stroke="oklch(0.6960 0.1700 162.4800)"
-              strokeWidth="3"
-              strokeLinecap="round"
-              className="transition-all duration-700 ease-out"
-            />
-          </svg>
+      <div className="relative overflow-x-auto py-3 px-2">
+        <div className="min-w-[720px] relative">
+          {/* Animated Connecting Flow Line - cleanly positioned underneath the boxes */}
+          <div className="absolute top-[52px] left-[8.333%] w-[83.333%] h-4 -translate-y-1/2 pointer-events-none z-0">
+            {/* Background Track Line (Dashed) */}
+            <div className="absolute top-1/2 left-0 w-full -translate-y-1/2 h-[2px] border-t-2 border-dashed border-border/80" />
 
-          {/* Pipeline Nodes */}
-          {PIPELINE_STAGES.map((stage, idx) => {
-            const Icon = stage.icon;
-            const isCompleted = idx < activeIndex;
-            const isCurrent = idx === activeIndex;
-            const isSelected = selectedStage.id === stage.id;
+            {/* Active Moving Green Line that slides smoothly to the clicked box */}
+            <div
+              className="absolute top-1/2 left-0 -translate-y-1/2 h-[3px] bg-emerald-500 rounded-full transition-all duration-500 ease-out shadow-[0_0_8px_rgba(16,185,129,0.5)]"
+              style={{
+                width: `${(activeIndex / (PIPELINE_STAGES.length - 1)) * 100}%`,
+              }}
+            />
 
-            return (
-              <button
-                key={stage.id}
-                type="button"
-                onClick={() => setSelectedStage(stage)}
-                className="relative z-10 flex flex-col items-center gap-2 group cursor-pointer focus:outline-none"
-              >
-                {/* Node Circle */}
-                <div
-                  className={`h-11 w-11 rounded-md flex items-center justify-center transition-all duration-300 relative border ${
-                    isSelected
-                      ? 'border-foreground shadow-sm ring-2 ring-foreground/20 scale-105'
-                      : isCurrent
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 animate-pulse'
-                        : isCompleted
-                          ? 'border-border bg-card text-foreground'
-                          : 'border-border/60 bg-muted/40 text-muted-foreground'
-                  }`}
+            {/* Glowing active node cursor on the line */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 h-2.5 w-2.5 rounded-full bg-emerald-400 border border-white dark:border-background shadow-[0_0_8px_rgba(52,211,153,0.9)] transition-all duration-500 ease-out -translate-x-1/2"
+              style={{
+                left: `${(activeIndex / (PIPELINE_STAGES.length - 1)) * 100}%`,
+              }}
+            />
+          </div>
+
+          {/* 6 Pipeline Nodes in equal 6-column grid */}
+          <div className="grid grid-cols-6 relative z-10">
+            {PIPELINE_STAGES.map((stage, idx) => {
+              const Icon = stage.icon;
+              const isCompleted = idx < activeIndex;
+              const isCurrent = idx === activeIndex;
+              const isSelected = selectedStage.id === stage.id;
+
+              return (
+                <button
+                  key={stage.id}
+                  type="button"
+                  onClick={() => handleStageClick(stage, idx)}
+                  className="flex flex-col items-center group cursor-pointer focus:outline-none w-full"
                 >
-                  <Icon className="h-5 w-5" />
-
-                  {/* Status Indicator Pip */}
-                  {isCompleted && (
-                    <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white">
-                      ✓
-                    </span>
-                  )}
-                  {isCurrent && status === 'failed' && (
-                    <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-destructive flex items-center justify-center text-[8px] text-white">
-                      !
-                    </span>
-                  )}
-                </div>
-
-                {/* Node Label */}
-                <div className="text-center max-w-[95px]">
-                  <p
-                    className={`text-xs font-semibold tracking-tight transition-colors ${
+                  {/* Node Box (cleanly sitting above the line) */}
+                  <div
+                    className={`h-11 w-11 rounded-md flex items-center justify-center transition-all duration-300 relative border ${
                       isSelected
-                        ? 'text-foreground underline underline-offset-4'
+                        ? 'border-emerald-500 bg-card text-foreground shadow-sm ring-2 ring-emerald-500/20 scale-105'
                         : isCurrent
-                          ? 'text-emerald-600 dark:text-emerald-400'
+                          ? 'border-emerald-500/80 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                           : isCompleted
-                            ? 'text-foreground'
-                            : 'text-muted-foreground'
+                            ? 'border-emerald-500/50 bg-card text-emerald-600 dark:text-emerald-400'
+                            : 'border-border/80 bg-card text-muted-foreground hover:border-foreground/40'
                     }`}
                   >
-                    {stage.label}
-                  </p>
-                  <span className="text-[10px] font-mono text-muted-foreground line-clamp-1 block mt-0.5">
-                    Step 0{idx + 1}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
+                    <Icon className="h-5 w-5" />
+
+                    {/* Status Indicator Pip */}
+                    {isCompleted && (
+                      <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 flex items-center justify-center text-[8px] text-white">
+                        ✓
+                      </span>
+                    )}
+                    {isCurrent && status === 'failed' && (
+                      <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-destructive flex items-center justify-center text-[8px] text-white">
+                        !
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Spacer between the box and the label, through which the line passes cleanly underneath the box */}
+                  <div className="h-4" />
+
+                  {/* Node Label */}
+                  <div className="text-center w-full px-1">
+                    <p
+                      className={`text-xs font-semibold tracking-tight transition-colors line-clamp-1 ${
+                        isSelected
+                          ? 'text-foreground underline underline-offset-4'
+                          : isCurrent
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : isCompleted
+                              ? 'text-foreground'
+                              : 'text-muted-foreground'
+                      }`}
+                    >
+                      {stage.label}
+                    </p>
+                    <span className="text-[10px] font-mono text-muted-foreground line-clamp-1 block mt-0.5">
+                      Step 0${idx + 1}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
