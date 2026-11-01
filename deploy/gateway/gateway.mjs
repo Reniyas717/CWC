@@ -235,7 +235,9 @@ export class CaddyAdminClient {
 export class QuickTunnel {
   constructor(
     spawnImpl = spawn,
-    { probe = fetch, readinessTimeoutMs = 30000, retryIntervalMs = 1000 } = {}
+    // A new hostname can initially return NXDOMAIN with a 60-second negative
+    // cache lifetime. Keep the tunnel alive long enough for resolvers to retry.
+    { probe = fetch, readinessTimeoutMs = 90000, retryIntervalMs = 1000 } = {}
   ) {
     this.spawn = spawnImpl;
     this.probe = probe;
@@ -342,7 +344,7 @@ export class QuickTunnel {
             502,
             'TUNNEL_START_FAILED',
             publicUrlSeen
-              ? 'cloudflared URL did not become publicly reachable within 30 seconds'
+              ? `cloudflared URL did not become publicly reachable within ${this.readinessTimeoutMs / 1000} seconds`
               : 'cloudflared did not provide a public URL within 15 seconds'
           )
         );

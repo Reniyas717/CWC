@@ -354,6 +354,36 @@ assert.equal(quickTunnelResult.url, 'https://brisk-moon.trycloudflare.com');
 assert.equal(publicProbeAttempts, 3);
 quickTunnelResult.stop();
 
+// A fresh tunnel can return NXDOMAIN before its DNS record propagates. Cached
+// negative answers must expire before the readiness budget gives up.
+const realNow = Date.now;
+const realSetTimeout = globalThis.setTimeout;
+let elapsed = 0;
+let dnsAttempts = 0;
+Date.now = () => realNow() + elapsed;
+globalThis.setTimeout = (callback, delay, ...args) =>
+  realSetTimeout(callback, delay > 1000 ? 100 : delay, ...args);
+try {
+  const delayedDns = new QuickTunnel(() => tunnelChild, {
+    retryIntervalMs: 1,
+    probe: async () => {
+      dnsAttempts += 1;
+      elapsed += 10000;
+      if (elapsed < 70000) throw Object.assign(new Error('DNS negative cache'), { code: 'ENOTFOUND' });
+      return { ok: true, status: 200 };
+    },
+  });
+  const delayed = delayedDns.start(19004);
+  tunnelOutput.write('INF https://delayed-dns.trycloudflare.com\n');
+  const ready = await delayed;
+  assert.equal(ready.url, 'https://delayed-dns.trycloudflare.com');
+  assert.equal(dnsAttempts, 7);
+  ready.stop();
+} finally {
+  Date.now = realNow;
+  globalThis.setTimeout = realSetTimeout;
+}
+
 server.close();
 healthServer.close();
 console.log(
