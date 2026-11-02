@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Cloud Without Clouds",
+    "slug": "cloud-without-clouds-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.cloudwithoutclouds.mobile"
+    },
+    "android": {
+      "package": "com.cloudwithoutclouds.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a0a0a"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

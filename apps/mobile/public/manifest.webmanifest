@@ -1,0 +1,33 @@
+{
+  "name": "Cloud Without Clouds",
+  "short_name": "CWC Mobile",
+  "description": "Zero-Hyperscaler Distributed Application Cloud - Mobile Node & Fleet Controller",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#10b981",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer", "cloud", "productivity"],
+  "shortcuts": [
+    {
+      "name": "Deploy App",
+      "short_name": "Deploy",
+      "url": "/apps?action=deploy",
+      "description": "Deploy a new workload instantly"
+    },
+    {
+      "name": "Cluster Health",
+      "short_name": "Fleet",
+      "url": "/workers",
+      "description": "Inspect distributed worker laptops"
+    }
+  ]
+}

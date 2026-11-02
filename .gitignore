@@ -6,6 +6,39 @@ node_modules/
 dist/
 build/
 .turbo/
+*.tsbuildinfo
+
+# Mobile & Expo
+.expo/
+.expo-shared/
+web-build/
+*.apk
+*.aab
+*.ipa
+.metro-cache/
+
+# Images, screenshots & media
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.tiff
+*.ico
+*.mp4
+*.mov
+*.avi
+*screen*.png
+*screenshot*
+!apps/web/public/favicon.svg
+!apps/mobile/public/favicon.svg
+
+# Temporary test & patch scripts
+check_bundle.cjs
+patch_*.cjs
+test_*.cjs
+*.patch
 
 # Environment files
 .env

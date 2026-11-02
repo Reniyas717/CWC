@@ -1,0 +1,42 @@
+{
+  "name": "@cloud-without-clouds/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "App.tsx",
+  "scripts": {
+    "dev": "vite --port 5174",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 5174",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "start": "vite --port 5174",
+    "expo:start": "expo start"
+  },
+  "dependencies": {
+    "@cloud-without-clouds/shared": "workspace:*",
+    "@tanstack/react-query": "^5.67.1",
+    "clsx": "^2.1.1",
+    "expo": "^58.0.5",
+    "lucide-react": "^0.477.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-native": "^0.76.0",
+    "react-router-dom": "^6.28.2",
+    "recharts": "^3.10.1",
+    "tailwind-merge": "^3.0.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.13.9",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/react-native": "^0.73.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}
