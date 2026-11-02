@@ -439,27 +439,33 @@ workersRouter.post('/heartbeat', requireWorker, async (req: Request, res: Respon
   const now = new Date();
 
   try {
-    // Check if worker exists
+    const peerAddress = (req.ip ?? req.socket.remoteAddress ?? '127.0.0.1').replace(/^::ffff:/, '');
+    // Any authenticated first heartbeat can enroll a node. Registration remains
+    // the richer path for supplying a friendly name, port, and resource caps.
     const existing = await db
       .select({ id: workerNodes.id, ipAddress: workerNodes.ipAddress })
       .from(workerNodes)
       .where(eq(workerNodes.id, payload.workerId));
 
     if (existing.length === 0) {
-      res.status(404).json({
-        success: false,
-        error: {
-          code: 'WORKER_NOT_REGISTERED',
-          message: `Worker '${payload.workerId}' is not registered. Please register first.`,
-        },
-      });
-      return;
-    }
-
-    const peerAddress = getTailscalePeerAddress(req);
-    if (peerAddress && peerAddress !== existing[0].ipAddress) {
-      rejectWorkerIdentityMismatch(res, payload.workerId);
-      return;
+      await db.insert(workerNodes).values({
+        id: payload.workerId,
+        name: payload.workerId,
+        hostname: payload.workerId,
+        ipAddress: peerAddress,
+        port: 5001,
+        state: payload.state,
+        cpuCores: payload.resources.cpuCount,
+        cpuUsagePercent: payload.resources.cpuUsagePercent,
+        totalMemoryMb: payload.resources.totalMemoryMb,
+        freeMemoryMb: payload.resources.freeMemoryMb,
+        usedMemoryMb: payload.resources.usedMemoryMb,
+        maxConcurrentWorkloads: 1,
+        activeContainers: payload.resources.activeContainers,
+        version: '0.1.0',
+        registeredAt: now,
+        lastHeartbeatAt: now,
+      }).onConflictDoNothing();
     }
 
     // Update telemetry in PostgreSQL

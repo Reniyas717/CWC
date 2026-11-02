@@ -47,6 +47,13 @@ When a tunnel restarts, the gateway's route status exposes the replacement
 dashboard. These fields and any shared `routingStatus` enum require agreement
 before changing `packages/shared`.
 
+Keep the gateway process running alongside the API and worker. A refused
+connection on port 5050 means this service is not available. URL publication
+waits up to 90 seconds for public HTTPS readiness because a newly generated
+hostname may initially return NXDOMAIN and remain in a resolver's negative
+cache for 60 seconds. The API allows 120 seconds per route so it does not abort
+publication while the gateway is still waiting for DNS.
+
 On gateway restart, the control plane must call `POST /v1/reconcile` with its
 authoritative current deployment records. The gateway does not restore a local
 snapshot. If reconciliation fails, it clears in-memory routes and returns

@@ -46,7 +46,8 @@ export class GatewayClient {
               healthPath,
               ...(attemptId ? { attemptId } : {}),
             }),
-            signal: AbortSignal.timeout(18000),
+            // Gateway allows 15s for tunnel startup plus 90s for DNS/readiness.
+            signal: AbortSignal.timeout(120000),
           }
         );
 
@@ -192,7 +193,8 @@ export class GatewayClient {
             Authorization: `Bearer ${this.token}`,
           },
           body: JSON.stringify({ routes }),
-          signal: AbortSignal.timeout(20000),
+          // Reconciliation may start each missing tunnel sequentially.
+          signal: AbortSignal.timeout(120000 * Math.max(1, routes.length)),
         });
 
         if (response.ok) {
